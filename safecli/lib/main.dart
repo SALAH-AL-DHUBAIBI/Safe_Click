@@ -8,6 +8,7 @@ import 'controllers/settings_controller.dart';
 import 'controllers/profile_controller.dart';
 import 'controllers/report_controller.dart';
 import 'services/notification_service.dart';
+import 'services/api_service.dart'; // استيراد API service
 import 'views/splash_screen.dart';
 import 'views/auth/login_screen.dart';
 import 'views/auth/register_screen.dart';
@@ -24,6 +25,9 @@ import 'models/scan_result.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // تهيئة API service
+  await ApiService.initialize();
   
   // تهيئة الإشعارات
   await NotificationService().initialize();
@@ -77,6 +81,13 @@ class _MyAppState extends State<MyApp> {
     final link = _pendingLink!;
     _pendingLink = null;
     
+    // التأكد من تسجيل الدخول
+    final authController = Provider.of<AuthController>(context, listen: false);
+    if (!authController.isAuthenticated) {
+      // إذا لم يكن مسجل دخول، انتظر حتى يسجل ثم افحص الرابط
+      return;
+    }
+    
     final scanController = Provider.of<ScanController>(context, listen: false);
     
     // عرض مؤشر تحميل
@@ -103,6 +114,14 @@ class _MyAppState extends State<MyApp> {
         context,
         MaterialPageRoute(
           builder: (context) => ResultScreen(scanResult: result),
+        ),
+      );
+    } else {
+      // عرض خطأ
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(scanController.lastError ?? 'فشل فحص الرابط'),
+          backgroundColor: Theme.of(context).colorScheme.error,
         ),
       );
     }

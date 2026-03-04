@@ -1,71 +1,61 @@
-﻿import 'package:flutter/material.dart';
+﻿// lib/controllers/report_controller.dart
+import 'package:flutter/material.dart';
+import '../services/api_service.dart';
 import '../models/report_model.dart';
-import '../services/local_storage_service.dart';
 
 class ReportController extends ChangeNotifier {
+  final ApiService _apiService = ApiService();
   List<ReportModel> _reports = [];
   bool _isReporting = false;
-  bool _isLoading = false;
   String? _lastError;
-
-  final LocalStorageService _storageService = LocalStorageService();
 
   List<ReportModel> get reports => List.unmodifiable(_reports);
   bool get isReporting => _isReporting;
-  bool get isLoading => _isLoading;
   String? get lastError => _lastError;
 
-  ReportController() {
-    _loadReports();
-  }
+  // دالة جديدة تستقبل بيانات منفصلة
+  Future<bool> submitReport({
+    required String link,
+    required String category,
+    required String description,
+    required int severity,
+    required String reporterName,
+  }) async {
+    _isReporting = true;
+    _lastError = null;
+    notifyListeners();
 
-  Future<void> _loadReports() async {
     try {
-      _isLoading = true;
-      notifyListeners();
-
-      final savedReports = await _storageService.getReports();
-      _reports = savedReports;
-    } catch (e) {
-      _lastError = 'خطأ في تحميل البلاغات';
-    } finally {
-      _isLoading = false;
-      notifyListeners();
-    }
-  }
-
-  Future<bool> submitReport(ReportModel report) async {
-    try {
-      _isReporting = true;
-      _lastError = null;
-      notifyListeners();
-
-      // إنشاء معرف فريد ورقم تتبع
-      final reportWithId = ReportModel(
-        id: 'rep_${DateTime.now().millisecondsSinceEpoch}',
-        link: report.link,
-        category: report.category,
-        description: report.description,
-        reporterId: report.reporterId,
-        reporterName: report.reporterName,
-        reportDate: DateTime.now(),
-        status: 'pending',
-        trackingNumber: _generateTrackingNumber(),
-        severity: report.severity ?? _calculateSeverity(report),
+      print('🔵 إرسال بلاغ: $link - $category');
+      
+      final response = await _apiService.createReport(
+        link: link,
+        category: category,
+        description: description,
+        severity: severity,
+        isAnonymous: reporterName == 'مستخدم مجهول',
       );
 
-      // محاكاة إرسال البلاغ
-      await Future.delayed(const Duration(seconds: 2));
+      print('📥 الرد: $response');
 
-      // إضافة البلاغ للقائمة
-      _reports.insert(0, reportWithId);
-      
-      // حفظ البلاغات
-      await _storageService.saveReports(_reports);
-
-      return true;
+      if (response['success'] == true) {
+        // إضافة البلاغ إلى القائمة
+        if (response['report'] != null) {
+          final newReport = ReportModel.fromJson(response['report']);
+          _reports.insert(0, newReport);
+        }
+        
+        // جلب البلاغات المحدثة
+        await fetchMyReports();
+        
+        return true;
+      } else {
+        _lastError = response['message'] ?? 'فشل إرسال البلاغ';
+        return false;
+      }
     } catch (e) {
-      _lastError = 'حدث خطأ أثناء إرسال البلاغ';
+      print('❌ خطأ: $e');
+      _lastError = 'حدث خطأ في الاتصال بالخادم';
       return false;
     } finally {
       _isReporting = false;
@@ -73,59 +63,17 @@ class ReportController extends ChangeNotifier {
     }
   }
 
-  String _generateTrackingNumber() {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    final random = DateTime.now().millisecondsSinceEpoch;
-    String result = 'RPT-';
-    for (int i = 0; i < 8; i++) {
-      result += chars[(random + i) % chars.length];
-    }
-    return result;
-  }
-
-  int _calculateSeverity(ReportModel report) {
-    // حساب درجة الخطورة بناءً على التصنيف
-    if (report.category.contains('فيروسات') || report.category.contains('تصيد')) {
-      return 5;
-    } else if (report.category.contains('احتيال')) {
-      return 4;
-    } else if (report.category.contains('غير لائق')) {
-      return 3;
-    } else if (report.category.contains('بريد عشوائي')) {
-      return 2;
-    }
-    return 1;
-  }
-
-  Future<List<ReportModel>> getUserReports(String userId) async {
-    return _reports.where((report) => report.reporterId == userId).toList();
-  }
-
-  Future<ReportModel?> getReportByTrackingNumber(String trackingNumber) async {
+  Future<void> fetchMyReports() async {
     try {
-      return _reports.firstWhere(
-        (report) => report.trackingNumber == trackingNumber,
-      );
+      final response = await _apiService.getMyReports();
+      if (response['success'] == true) {
+        final List<dynamic> reportsJson = response['reports'] ?? [];
+        _reports = reportsJson.map((json) => ReportModel.fromJson(json)).toList();
+        notifyListeners();
+      }
     } catch (e) {
-      return null;
+      print('❌ خطأ في جلب البلاغات: $e');
     }
-  }
-
-  Future<void> refreshReports() async {
-    await _loadReports();
-  }
-
-  Map<String, dynamic> getStats() {
-    int pending = _reports.where((r) => r.status == 'pending').length;
-    int reviewed = _reports.where((r) => r.status == 'reviewed').length;
-    int resolved = _reports.where((r) => r.status == 'resolved').length;
-
-    return {
-      'total': _reports.length,
-      'pending': pending,
-      'reviewed': reviewed,
-      'resolved': resolved,
-    };
   }
 
   void clearError() {

@@ -4,6 +4,7 @@ import '../models/scan_result.dart';
 import '../services/scan_service.dart';
 import '../services/local_storage_service.dart';
 import '../services/virustotal_service.dart';
+import '../services/api_service.dart'; // استيراد API service
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ScanController extends ChangeNotifier {
@@ -14,6 +15,7 @@ class ScanController extends ChangeNotifier {
   
   final ScanService _scanService = ScanService();
   final LocalStorageService _storageService = LocalStorageService();
+  final ApiService _apiService = ApiService(); // إضافة API service
   late VirusTotalService _virusTotalService;
   
   bool _useVirusTotal = true;
@@ -33,12 +35,31 @@ class ScanController extends ChangeNotifier {
 
   Future<void> _loadHistory() async {
     try {
-      final history = await _storageService.getScanHistory();
-      _scanHistory = history;
+      // محاولة تحميل السجل من API أولاً
+      final response = await _apiService.getScanHistory();
+      
+      if (response['success'] == true) {
+        final List<dynamic> historyData = response['history'];
+        _scanHistory = historyData.map((data) => ScanResult.fromJson(data)).toList();
+      } else {
+        // إذا فشل API، استخدم التخزين المحلي
+        final history = await _storageService.getScanHistory();
+        _scanHistory = history;
+      }
+      
       _calculateDangerousScans();
       notifyListeners();
     } catch (e) {
-      _lastError = 'خطأ في تحميل السجل';
+      print('خطأ في تحميل السجل: $e');
+      // في حالة الخطأ، استخدم التخزين المحلي
+      try {
+        final history = await _storageService.getScanHistory();
+        _scanHistory = history;
+        _calculateDangerousScans();
+        notifyListeners();
+      } catch (e) {
+        _lastError = 'خطأ في تحميل السجل';
+      }
     }
   }
 
@@ -47,56 +68,88 @@ class ScanController extends ChangeNotifier {
   }
 
   Future<ScanResult?> scanLink(String link) async {
-    try {
-      _isScanning = true;
-      _lastError = null;
-      notifyListeners();
+  try {
+    _isScanning = true;
+    _lastError = null;
+    notifyListeners();
 
-      // تنظيف الرابط
-      link = link.trim();
+    link = link.trim();
+    if (link.isEmpty) {
+      throw Exception('الرجاء إدخال رابط للفحص');
+    }
+
+    String formattedLink = _virusTotalService.formatUrl(link);
+    if (!_virusTotalService.isValidUrl(formattedLink)) {
+      throw Exception('الرابط غير صحيح');
+    }
+
+    print('🔍 جاري فحص الرابط: $formattedLink');
+    
+    // استخدام API Django
+    final response = await _apiService.scanLink(formattedLink);
+    
+    ScanResult? result;
+    
+    if (response['success'] == true) {
+      // البيانات قد تكون في 'result' أو مباشرة في response
+      final resultData = response['result'] ?? response;
+      print('📦 Result data type: ${resultData.runtimeType}');
       
-      if (link.isEmpty) {
-        throw Exception('الرجاء إدخال رابط للفحص');
+      try {
+        result = ScanResult.fromJson(resultData);
+        print('✅ تم تحويل البيانات بنجاح');
+      } catch (e) {
+        print('❌ خطأ في تحويل البيانات: $e');
+        print('📦 البيانات: $resultData');
+        
+        // إنشاء نتيجة افتراضية في حالة الفشل
+        result = ScanResult(
+          id: 'scan_${DateTime.now().millisecondsSinceEpoch}',
+          link: formattedLink,
+          safe: null,
+          score: 50,
+          message: 'تم الفحص ولكن حدث خطأ في تحليل النتائج',
+          details: ['حدث خطأ في تحليل بيانات الفحص', 'يرجى المحاولة مرة أخرى'],
+          timestamp: DateTime.now(),
+        );
       }
-
-      // تنسيق الرابط (إضافة https:// إذا لزم الأمر)
-      String formattedLink = _virusTotalService.formatUrl(link);
-
-      // التحقق من صحة الرابط
-      if (!_virusTotalService.isValidUrl(formattedLink)) {
-        throw Exception('الرابط غير صحيح. مثال: google.com');
-      }
-
-      print('🔍 جاري فحص الرابط: $formattedLink');
+    } else {
+      // استخدام VirusTotal كبديل
+      print('⚠️ استخدام VirusTotal كبديل');
+      result = await _virusTotalService.scanUrl(formattedLink);
       
-      // الفحص باستخدام VirusTotal
-      ScanResult? result = await _virusTotalService.scanUrl(formattedLink);
-      
-      // إذا فشل VirusTotal، استخدم الخدمة المحلية كبديل
-      if (result == null || (result.score == 0 && result.details.contains('⚠️'))) {
-        print('⚠️ استخدام الخدمة المحلية كبديل');
+      if (result == null) {
         result = await _scanService.scanUrl(formattedLink);
       }
+    }
 
-      // حفظ النتيجة في السجل
-      if (result != null) {
-        _scanHistory.insert(0, result);
-        await _saveHistory();
-        _calculateDangerousScans();
-        print('✅ تم حفظ نتيجة الفحص في السجل');
-      } else {
-        throw Exception('فشل الفحص - يرجى المحاولة مرة أخرى');
-      }
+    // حفظ النتيجة
+    if (result != null) {
+      _scanHistory.insert(0, result);
+      await _saveHistory();
+      _calculateDangerousScans();
+      print('✅ تم حفظ نتيجة الفحص');
+    }
 
-      return result;
+    return result;
+    
+  } catch (e) {
+    String errorMessage = e.toString().replaceFirst('Exception: ', '');
+    _lastError = errorMessage;
+    print('❌ خطأ في الفحص: $errorMessage');
+    return null;
+  } finally {
+    _isScanning = false;
+    notifyListeners();
+  }
+}
+
+  Future<void> _syncWithServer(ScanResult result) async {
+    try {
+      // محاولة مزامنة النتيجة مع السيرفر
+      await _apiService.scanLink(result.link);
     } catch (e) {
-      String errorMessage = e.toString().replaceFirst('Exception: ', '');
-      _lastError = errorMessage;
-      print('❌ خطأ في الفحص: $errorMessage');
-      return null;
-    } finally {
-      _isScanning = false;
-      notifyListeners();
+      print('خطأ في مزامنة النتيجة مع السيرفر: $e');
     }
   }
 
@@ -121,11 +174,22 @@ class ScanController extends ChangeNotifier {
       onProgress(0.2); // بدأ الفحص
       print('🔍 جاري فحص الرابط: $formattedLink');
       
-      ScanResult? result = await _virusTotalService.scanUrl(formattedLink);
+      // استخدام API Django
+      final response = await _apiService.scanLink(formattedLink);
       onProgress(0.8); // اكتمل الفحص تقريباً
-
-      if (result == null || (result.score == 0 && result.details.contains('⚠️'))) {
-        result = await _scanService.scanUrl(formattedLink);
+      
+      ScanResult? result;
+      
+      if (response['success'] == true) {
+        final resultData = response['result'];
+        result = ScanResult.fromJson(resultData);
+      } else {
+        // استخدام VirusTotal كبديل
+        result = await _virusTotalService.scanUrl(formattedLink);
+        
+        if (result == null || (result.score == 0 && result.details.contains('⚠️'))) {
+          result = await _scanService.scanUrl(formattedLink);
+        }
       }
 
       if (result != null) {
@@ -147,6 +211,7 @@ class ScanController extends ChangeNotifier {
 
   Future<void> _saveHistory() async {
     try {
+      // حفظ في التخزين المحلي
       final prefs = await SharedPreferences.getInstance();
       final historyJson = _scanHistory.map((e) => jsonEncode(e.toJson())).toList();
       await prefs.setStringList('scanHistory', historyJson);
@@ -157,13 +222,21 @@ class ScanController extends ChangeNotifier {
 
   Future<void> clearHistory() async {
     try {
-      _scanHistory.clear();
-      _dangerousScans = 0;
+      // مسح من API
+      final response = await _apiService.clearHistory();
       
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('scanHistory');
-      
-      notifyListeners();
+      if (response['success'] == true) {
+        _scanHistory.clear();
+        _dangerousScans = 0;
+        
+        // مسح من التخزين المحلي
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('scanHistory');
+        
+        notifyListeners();
+      } else {
+        _lastError = 'فشل مسح السجل من الخادم';
+      }
     } catch (e) {
       _lastError = 'خطأ في مسح السجل';
     }
@@ -171,10 +244,17 @@ class ScanController extends ChangeNotifier {
 
   Future<void> deleteScanResult(String id) async {
     try {
-      _scanHistory.removeWhere((scan) => scan.id == id);
-      _calculateDangerousScans();
-      await _saveHistory();
-      notifyListeners();
+      // حذف من API
+      final response = await _apiService.deleteScan(id);
+      
+      if (response['success'] == true) {
+        _scanHistory.removeWhere((scan) => scan.id == id);
+        _calculateDangerousScans();
+        await _saveHistory();
+        notifyListeners();
+      } else {
+        _lastError = 'فشل حذف الفحص';
+      }
     } catch (e) {
       _lastError = 'خطأ في حذف الفحص';
     }

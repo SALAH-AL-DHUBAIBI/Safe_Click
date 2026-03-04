@@ -56,19 +56,55 @@ class ScanResult {
         'threatsCount': threatsCount,
       };
 
-  factory ScanResult.fromJson(Map<String, dynamic> json) => ScanResult(
-        id: json['id'],
-        link: json['link'],
-        safe: json['safe'],
-        score: json['score'],
-        message: json['message'],
-        details: List<String>.from(json['details']),
-        timestamp: DateTime.parse(json['timestamp']),
-        rawData: json['rawData'],
-        responseTime: json['responseTime']?.toDouble() ?? 0.0,
-        ipAddress: json['ipAddress'],
-        domain: json['domain'],
-        threatsCount: json['threatsCount'],
-      );
+  factory ScanResult.fromJson(Map<String, dynamic> json) {
+  return ScanResult(
+    id: json['id']?.toString() ?? 'scan_${DateTime.now().millisecondsSinceEpoch}',
+    link: json['link']?.toString() ?? '',
+    safe: json['safe'], // يمكن أن يكون bool أو null
+    score: json['score'] is int ? json['score'] : (json['score'] as double?)?.toInt() ?? 0,
+    message: json['message']?.toString() ?? json['safety_status']?.toString() ?? 'نتيجة الفحص',
+    details: _parseDetails(json),
+    timestamp: _parseTimestamp(json),
+    rawData: json,
+    responseTime: json['response_time']?.toDouble() ?? json['responseTime']?.toDouble() ?? 0.0,
+    ipAddress: json['ip_address']?.toString() ?? json['ipAddress']?.toString(),
+    domain: json['domain']?.toString(),
+    threatsCount: json['threats_count'] is int 
+        ? json['threats_count'] 
+        : (json['threats_count'] as double?)?.toInt() ?? 
+          (json['threatsCount'] as int?) ?? 0,
+  );
+}
+
+static List<String> _parseDetails(Map<String, dynamic> json) {
+  // محاولة استخراج التفاصيل من مصادر مختلفة
+  if (json['details'] != null) {
+    if (json['details'] is List) {
+      return List<String>.from(json['details'].map((x) => x.toString()));
+    } else if (json['details'] is String) {
+      return [json['details'].toString()];
+    }
+  }
+  
+  // إذا كان هناك result يحتوي على details
+  if (json['result'] != null && json['result']['details'] != null) {
+    if (json['result']['details'] is List) {
+      return List<String>.from(json['result']['details'].map((x) => x.toString()));
+    }
+  }
+  
+  return ['لا توجد تفاصيل إضافية'];
+}
+
+static DateTime _parseTimestamp(Map<String, dynamic> json) {
+  if (json['timestamp'] != null) {
+    try {
+      return DateTime.parse(json['timestamp'].toString());
+    } catch (e) {
+      // تجاهل الخطأ
+    }
+  }
+  return DateTime.now();
+}
 }
 

@@ -2,6 +2,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user_model.dart';
 import '../services/local_storage_service.dart';
+import '../services/api_service.dart'; // استيراد API service
 
 class AuthController extends ChangeNotifier {
   UserModel? _currentUser;
@@ -10,6 +11,7 @@ class AuthController extends ChangeNotifier {
   bool _isAuthenticated = false;
 
   final LocalStorageService _storageService = LocalStorageService();
+  final ApiService _apiService = ApiService();
 
   UserModel? get currentUser => _currentUser;
   bool get isLoading => _isLoading;
@@ -21,151 +23,121 @@ class AuthController extends ChangeNotifier {
   }
 
   Future<void> _loadSavedUser() async {
-    try {
-      _isLoading = true;
-      notifyListeners();
+  try {
+    _isLoading = true;
+    notifyListeners();
 
-      final startTime = DateTime.now();
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('access_token');
 
-      final prefs = await SharedPreferences.getInstance();
-      final userId = prefs.getString('userId');
-      final token = prefs.getString('authToken');
-
-      if (userId != null && token != null) {
-        // يمكن التحقق من صحة التوكن هنا
+    if (token != null) {
+      final response = await _apiService.getProfile();
+      
+      // تعديل هنا: استخدم == true
+      if (response['success'] == true && response.containsKey('user')) {
+        _currentUser = UserModel.fromJson(response['user']);
         _isAuthenticated = true;
-        // تحميل بيانات المستخدم
-        await loadUserData(userId);
+      } else {
+        await prefs.remove('access_token');
+        await prefs.remove('refresh_token');
       }
-
-      final elapsed = DateTime.now().difference(startTime);
-      const minDuration = Duration(milliseconds: 2500);
-      if (elapsed < minDuration) {
-        await Future.delayed(minDuration - elapsed);
-      }
-    } catch (e) {
-      _error = 'خطأ في تحميل بيانات المستخدم';
-    } finally {
-      _isLoading = false;
-      notifyListeners();
     }
+  } catch (e) {
+    print('خطأ في تحميل المستخدم: $e');
+  } finally {
+    _isLoading = false;
+    notifyListeners();
   }
-
-  Future<void> loadUserData(String userId) async {
-    try {
-      final userData = await _storageService.getUser(userId);
-      if (userData != null) {
-        _currentUser = userData;
-        _isAuthenticated = true;
-      }
-    } catch (e) {
-      _error = 'خطأ في تحميل بيانات المستخدم';
-    }
-  }
+}
 
   Future<bool> login(String email, String password) async {
-    try {
-      _isLoading = true;
-      _error = null;
-      notifyListeners();
+  try {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
 
-      // محاكاة تسجيل الدخول - استبدلها بـ API حقيقي
-      await Future.delayed(const Duration(seconds: 2));
+    final response = await _apiService.login(email: email, password: password);
 
-      // التحقق من المدخلات
-      if (email.isEmpty || password.isEmpty) {
-        throw Exception('البريد الإلكتروني وكلمة المرور مطلوبان');
-      }
-
-      if (password.length < 6) {
-        throw Exception('كلمة المرور يجب أن تكون 6 أحرف على الأقل');
-      }
-
-      // محاكاة مستخدم
-      _currentUser = UserModel(
-        id: 'user_${DateTime.now().millisecondsSinceEpoch}',
-        name: email.split('@').first,
-        email: email,
-        createdAt: DateTime.now(),
-      );
-
+    // تعديل هنا: استخدم == true
+    if (response['success'] == true) {
+      _currentUser = UserModel.fromJson(response['user']);
       _isAuthenticated = true;
-
-      // حفظ بيانات المستخدم محلياً
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('userId', _currentUser!.id);
-      await prefs.setString('authToken', 'mock_token_${DateTime.now().millisecondsSinceEpoch}');
-      
-      await _storageService.saveUser(_currentUser!);
-
       return true;
-    } catch (e) {
-      _error = e.toString().replaceFirst('Exception: ', '');
+    } else {
+      _error = response['message'];
       return false;
-    } finally {
-      _isLoading = false;
-      notifyListeners();
     }
+  } catch (e) {
+    _error = 'حدث خطأ في الاتصال';
+    return false;
+  } finally {
+    _isLoading = false;
+    notifyListeners();
   }
+}
 
-  Future<bool> register(String name, String email, String password) async {
-    try {
-      _isLoading = true;
-      _error = null;
-      notifyListeners();
+  // استبدل دالة register بهذا الكود (بدون agreeToTerms)
+// في auth_controller.dart
+Future<bool> register(
+  String name, 
+  String email, 
+  String password, 
+  {required bool agreeToTerms}  // أضف هذا
+) async {
+  try {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
 
-      await Future.delayed(const Duration(seconds: 2));
+    if (!agreeToTerms) {  // تحقق من الموافقة
+      _error = 'يجب الموافقة على الشروط والأحكام';
+      return false;
+    }
 
-      if (name.isEmpty || email.isEmpty || password.isEmpty) {
-        throw Exception('جميع الحقول مطلوبة');
-      }
+    if (password.length < 6) {
+      _error = 'كلمة المرور يجب أن تكون 6 أحرف على الأقل';
+      return false;
+    }
 
-      if (!email.contains('@')) {
-        throw Exception('البريد الإلكتروني غير صحيح');
-      }
+    final response = await _apiService.register(
+      name: name,
+      email: email,
+      password: password,
+      passwordConfirm: password,
+    );
 
-      if (password.length < 6) {
-        throw Exception('كلمة المرور يجب أن تكون 6 أحرف على الأقل');
-      }
-
-      _currentUser = UserModel(
-        id: 'user_${DateTime.now().millisecondsSinceEpoch}',
-        name: name,
-        email: email,
-        createdAt: DateTime.now(),
-      );
-
+    if (response['success'] == true) {
+      _currentUser = UserModel.fromJson(response['user']);
       _isAuthenticated = true;
-
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('userId', _currentUser!.id);
-      await prefs.setString('authToken', 'mock_token_${DateTime.now().millisecondsSinceEpoch}');
-      
-      await _storageService.saveUser(_currentUser!);
-
       return true;
-    } catch (e) {
-      _error = e.toString().replaceFirst('Exception: ', '');
+    } else {
+      _error = response['message'];
       return false;
-    } finally {
-      _isLoading = false;
-      notifyListeners();
     }
+  } catch (e) {
+    _error = 'حدث خطأ في الاتصال';
+    return false;
+  } finally {
+    _isLoading = false;
+    notifyListeners();
   }
+}
 
   Future<void> logout() async {
     try {
       _isLoading = true;
       notifyListeners();
 
+      await _apiService.logout();
+      
       final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('userId');
-      await prefs.remove('authToken');
+      await prefs.remove('access_token');
+      await prefs.remove('refresh_token');
 
       _currentUser = null;
       _isAuthenticated = false;
     } catch (e) {
-      _error = 'خطأ في تسجيل الخروج';
+      print('خطأ في تسجيل الخروج: $e');
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -178,16 +150,93 @@ class AuthController extends ChangeNotifier {
       _error = null;
       notifyListeners();
 
-      await Future.delayed(const Duration(seconds: 2));
+      final response = await _apiService.forgotPassword(email);
 
-      if (email.isEmpty || !email.contains('@')) {
-        throw Exception('البريد الإلكتروني غير صحيح');
+      if (response['success']) {
+        return true;
+      } else {
+        _error = response['message'] ?? 'فشل إرسال بريد إعادة التعيين';
+        return false;
       }
-
-      // محاكاة إرسال بريد إعادة تعيين كلمة المرور
-      return true;
     } catch (e) {
-      _error = e.toString().replaceFirst('Exception: ', '');
+      _error = 'حدث خطأ في الاتصال بالخادم';
+      return false;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> updateProfile({String? name, String? email}) async {
+  try {
+    _isLoading = true;
+    notifyListeners();
+
+    final response = await _apiService.updateProfile(name: name, email: email);
+
+    if (response['success'] == true && response.containsKey('user')) {
+      _currentUser = UserModel.fromJson(response['user']);
+      return true;
+    } else {
+      _error = response['message'] ?? 'فشل تحديث البيانات';
+      return false;
+    }
+  } catch (e) {
+    _error = 'حدث خطأ في الاتصال';
+    return false;
+  } finally {
+    _isLoading = false;
+    notifyListeners();
+  }
+}
+
+  Future<bool> updateProfileImage(String imagePath) async {
+  try {
+    _isLoading = true;
+    notifyListeners();
+
+    final response = await _apiService.updateProfileImage(imagePath);
+
+    if (response['success'] == true && response.containsKey('user')) {
+      _currentUser = UserModel.fromJson(response['user']);
+      return true;
+    } else {
+      _error = response['message'] ?? 'فشل تحديث الصورة';
+      return false;
+    }
+  } catch (e) {
+    _error = 'حدث خطأ في الاتصال';
+    return false;
+  } finally {
+    _isLoading = false;
+    notifyListeners();
+  }
+}
+
+  Future<bool> changePassword({
+    required String oldPassword,
+    required String newPassword,
+    required String newPasswordConfirm,
+  }) async {
+    try {
+      _isLoading = true;
+      _error = null;
+      notifyListeners();
+
+      final response = await _apiService.changePassword(
+        oldPassword: oldPassword,
+        newPassword: newPassword,
+        newPasswordConfirm: newPasswordConfirm,
+      );
+
+      if (response['success']) {
+        return true;
+      } else {
+        _error = response['message'] ?? 'فشل تغيير كلمة المرور';
+        return false;
+      }
+    } catch (e) {
+      _error = 'حدث خطأ في الاتصال بالخادم';
       return false;
     } finally {
       _isLoading = false;
@@ -199,4 +248,13 @@ class AuthController extends ChangeNotifier {
     _error = null;
     notifyListeners();
   }
+  // أضف هذه الدوال المساعدة في نهاية الكلاس
+String? get userProfileImage => _currentUser?.profileImage;
+String get userName => _currentUser?.name ?? '';
+String get userEmail => _currentUser?.email ?? '';
+int get userScansCount => _currentUser?.scannedLinks ?? 0;
+int get userThreatsCount => _currentUser?.detectedThreats ?? 0;
+double get userAccuracyRate => _currentUser?.accuracyRate ?? 0.0;
+bool get isEmailVerified => _currentUser?.isEmailVerified ?? false;
+String get welcomeMessage => _isAuthenticated ? 'مرحباً، ${_currentUser?.name ?? ''}' : 'مرحباً بك';
 }

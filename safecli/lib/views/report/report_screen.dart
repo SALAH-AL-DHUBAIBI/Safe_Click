@@ -525,42 +525,47 @@ class _ReportScreenState extends State<ReportScreen> with SingleTickerProviderSt
   }
 
   Future<void> _submitReport(ReportController reportController) async {
-    if (_linkController.text.trim().isEmpty) {
-      showSnackBar('يرجى إدخال الرابط المشبوه', Theme.of(context).colorScheme.error);
-      return;
-    }
+  if (_linkController.text.trim().isEmpty) {
+    showSnackBar('يرجى إدخال الرابط المشبوه', Theme.of(context).colorScheme.error);
+    return;
+  }
 
-    if (_selectedCategory == null) {
-      showSnackBar('يرجى اختيار نوع التهديد', Theme.of(context).colorScheme.error);
-      return;
-    }
+  if (_selectedCategory == null) {
+    showSnackBar('يرجى اختيار نوع التهديد', Theme.of(context).colorScheme.error);
+    return;
+  }
 
-    // التحقق من صحة الرابط
-    if (!_isValidUrl(_linkController.text)) {
-      showSnackBar('الرابط غير صحيح', Theme.of(context).colorScheme.error);
-      return;
-    }
+  // التحقق من صحة الرابط
+  if (!_isValidUrl(_linkController.text)) {
+    showSnackBar('الرابط غير صحيح', Theme.of(context).colorScheme.error);
+    return;
+  }
 
-    final authController = context.read<AuthController>();
+  final authController = context.read<AuthController>();
 
-    final report = ReportModel(
-      id: '',
-      link: _linkController.text.trim(),
-      category: _selectedCategory!,
-      description: _descriptionController.text.trim(),
-      reporterId: authController.currentUser?.id ?? 'anonymous',
-      reporterName: authController.currentUser?.name ?? 'مستخدم مجهول',
-      reportDate: DateTime.now(),
-      severity: _selectedSeverity,
-    );
+  // إرسال البيانات مباشرة بدون إنشاء ReportModel
+  final success = await reportController.submitReport(
+    link: _linkController.text.trim(),
+    category: _selectedCategory!,
+    description: _descriptionController.text.trim(),
+    severity: _selectedSeverity,
+    reporterName: authController.currentUser?.name ?? 'مستخدم مجهول',
+  );
 
-    final success = await reportController.submitReport(report);
-
-    if (success && mounted) {
-      showSuccessDialog(reportController, report);
+  if (success && mounted) {
+    // انتظر قليلاً للتأكد من تحديث القائمة
+    await Future.delayed(const Duration(milliseconds: 500));
+    if (mounted) {
+      showSuccessDialog(reportController);
       clearForm();
     }
+  } else if (mounted) {
+    showSnackBar(
+      reportController.lastError ?? 'فشل إرسال البلاغ', 
+      Theme.of(context).colorScheme.error
+    );
   }
+}
 
   bool _isValidUrl(String url) {
     final urlPattern = r'^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$';
@@ -588,96 +593,85 @@ class _ReportScreenState extends State<ReportScreen> with SingleTickerProviderSt
     );
   }
 
-  void showSuccessDialog(ReportController reportController, ReportModel report) {
-    final trackingNumber = reportController.reports.first.trackingNumber ?? 'غير متوفر';
+  void showSuccessDialog(ReportController reportController) {
+  // الحصول على آخر بلاغ من القائمة
+  final lastReport = reportController.reports.isNotEmpty 
+      ? reportController.reports.first 
+      : null;
+  
+  final trackingNumber = lastReport?.trackingNumber ?? 'جاري إنشاء رقم التتبع';
 
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        title: Text(
-          'تم استلام البلاغ',
-          style: TextStyle(
-            color: Theme.of(context).colorScheme.onSurface,
-          ),
+  showDialog(
+    context: context,
+    builder: (context) => AlertDialog(
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      title: Text(
+        'تم استلام البلاغ',
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.onSurface,
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.tertiary.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.check_circle,
-                color: Theme.of(context).colorScheme.tertiary,
-                size: 60,
-              ),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.tertiary.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
             ),
-            const SizedBox(height: 20),
-            Text(
-              'شكراً لك على المساهمة في حماية المجتمع',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 16,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 20),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Column(
-                children: [
-                  Text(
-                    'رقم تتبع البلاغ:',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  SelectableText(
-                    trackingNumber,
-                    style: TextStyle(
-                      fontSize: 18,
-                      color: Theme.of(context).colorScheme.primary,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'إغلاق',
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
+            child: Icon(
+              Icons.check_circle,
+              color: Theme.of(context).colorScheme.tertiary,
+              size: 60,
             ),
           ),
-          ElevatedButton.icon(
-            onPressed: () {},
-            icon: const Icon(Icons.share),
-            label: const Text('مشاركة'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.primary,
-              foregroundColor: Theme.of(context).colorScheme.onPrimary,
+          const SizedBox(height: 20),
+          const Text(
+            'شكراً لك على المساهمة في حماية المجتمع',
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              children: [
+                const Text(
+                  'رقم تتبع البلاغ:',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                SelectableText(
+                  trackingNumber,
+                  style: TextStyle(
+                    fontSize: 18,
+                    color: Theme.of(context).colorScheme.primary,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
       ),
-    );
-  }
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(
+            'إغلاق',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
 
   void showReportsHistory(BuildContext context) {
     ScaffoldMessenger.of(context).showSnackBar(

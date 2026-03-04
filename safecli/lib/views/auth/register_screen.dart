@@ -46,6 +46,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _nameController.text.trim(),
         _emailController.text.trim(),
         _passwordController.text,
+        agreeToTerms: _agreeToTerms,
       );
 
       if (!context.mounted) return;
