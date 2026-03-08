@@ -6,5 +6,6 @@ class ClearHistoryUseCase {
   final ScanRepository _repository;
   ClearHistoryUseCase(this._repository);
 
-  Future<bool> call() => _repository.clearHistory();
+  /// Soft delete all scans for current user
+  Future<bool> call() => _repository.clearUserHistory();
 }

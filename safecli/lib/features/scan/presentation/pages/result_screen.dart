@@ -9,97 +9,462 @@ class ResultScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Color itemColor = scanResult.safe == true ? Theme.of(context).colorScheme.tertiary : scanResult.safe == false ? Theme.of(context).colorScheme.error : Theme.of(context).colorScheme.secondary;
+    final theme = Theme.of(context);
+    final isSafe = scanResult.safe;
+    final Color statusColor = isSafe == true
+        ? theme.colorScheme.tertiary
+        : isSafe == false
+            ? theme.colorScheme.error
+            : theme.colorScheme.secondary;
 
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        appBar: AppBar(
-          title: const Text('نتيجة الفحص'),
-          centerTitle: true,
-          backgroundColor: itemColor,
-          foregroundColor: Theme.of(context).colorScheme.onPrimary,
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.share),
-              onPressed: () => _shareResult(context),
+        body: CustomScrollView(
+          slivers: [
+            _buildSliverAppBar(context, statusColor),
+            SliverPadding(
+              padding: const EdgeInsets.all(20),
+              sliver: SliverList(
+                delegate: SliverChildListDelegate([
+                  _buildResultHeader(context, statusColor),
+                  const SizedBox(height: 20),
+                  _buildLinkCard(context, statusColor),
+                  const SizedBox(height: 20),
+                  _buildScoreCard(context, statusColor),
+                  const SizedBox(height: 20),
+                  _buildDetailsCard(context, statusColor),
+                  if (scanResult.ipAddress != null || scanResult.domain != null) ...[
+                    const SizedBox(height: 20),
+                    _buildTechnicalInfo(context, statusColor),
+                  ],
+                  const SizedBox(height: 30),
+                  _buildActionButtons(context, statusColor),
+                  const SizedBox(height: 20),
+                ]),
+              ),
             ),
           ],
-        ),
-        body: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              _buildResultHeader(context, itemColor),
-              const SizedBox(height: 20),
-              _buildLinkCard(context),
-              const SizedBox(height: 20),
-              _buildScoreCard(context, itemColor),
-              const SizedBox(height: 20),
-              _buildDetailsCard(context),
-              const SizedBox(height: 20),
-              _buildTechnicalInfo(context),
-              const SizedBox(height: 30),
-              _buildActionButtons(context, itemColor),
-            ],
-          ),
         ),
       ),
     );
   }
 
-  Widget _buildResultHeader(BuildContext context, Color itemColor) {
-    IconData icon;
-    String statusText;
-    Color color = itemColor;
+  Widget _buildSliverAppBar(BuildContext context, Color statusColor) {
+    final theme = Theme.of(context);
+    final isSafe = scanResult.safe;
+    
+    String statusText = isSafe == true
+        ? 'آمن'
+        : isSafe == false
+            ? 'خطير'
+            : 'مشبوه';
 
-    if (scanResult.safe == true) {
-      icon = Icons.check_circle_outline;
-      statusText = 'الرابط آمن';
-    } else if (scanResult.safe == false) {
-      icon = Icons.dangerous_outlined;
-      statusText = 'الرابط خطير';
-    } else {
-      icon = Icons.warning_amber_outlined;
-      statusText = 'الرابط مشبوه';
-    }
+    return SliverAppBar(
+      expandedHeight: 160,
+      floating: false,
+      pinned: true,
+      backgroundColor: statusColor,
+      foregroundColor: theme.colorScheme.onPrimary,
+      flexibleSpace: FlexibleSpaceBar(
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.onPrimary.withValues(alpha: 0.2),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                isSafe == true
+                    ? Icons.check_circle_rounded
+                    : isSafe == false
+                        ? Icons.dangerous_rounded
+                        : Icons.warning_rounded,
+                size: 20,
+                color: theme.colorScheme.onPrimary,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'نتيجة الفحص: $statusText',
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: theme.colorScheme.onPrimary,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        titlePadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        background: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                statusColor,
+                statusColor.withValues(alpha: 0.8),
+              ],
+            ),
+          ),
+          child: Stack(
+            children: [
+              Positioned(
+                top: -30,
+                right: -30,
+                child: Icon(
+                  isSafe == true
+                      ? Icons.check_circle_rounded
+                      : isSafe == false
+                          ? Icons.dangerous_rounded
+                          : Icons.warning_rounded,
+                  size: 150,
+                  color: theme.colorScheme.onPrimary.withValues(alpha: 0.1),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.share_rounded),
+          onPressed: () => _shareResult(context),
+          tooltip: 'مشاركة',
+        ),
+      ],
+    );
+  }
+
+  Widget _buildResultHeader(BuildContext context, Color statusColor) {
+    final theme = Theme.of(context);
+    final isSafe = scanResult.safe;
 
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            statusColor.withValues(alpha: 0.1),
+            statusColor.withValues(alpha: 0.05),
+          ],
+        ),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
+        border: Border.all(
+          color: statusColor.withValues(alpha: 0.2),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: statusColor,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: statusColor.withValues(alpha: 0.3),
+                      blurRadius: 10,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                ),
+                child: Icon(
+                  isSafe == true
+                      ? Icons.check_circle_rounded
+                      : isSafe == false
+                          ? Icons.dangerous_rounded
+                          : Icons.warning_rounded,
+                  color: theme.colorScheme.onPrimary,
+                  size: 32,
+                ),
+              ),
+              const SizedBox(width: 20),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      scanResult.message,
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: statusColor,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      isSafe == true
+                          ? 'يمكنك فتح الرابط بأمان'
+                          : isSafe == false
+                              ? 'ننصحك بعدم فتح هذا الرابط'
+                              : 'تعامل مع هذا الرابط بحذر',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLinkCard(BuildContext context, Color statusColor) {
+    final theme = Theme.of(context);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.cardTheme.color,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.link_rounded,
+                    color: statusColor,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  'الرابط المفحوص',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: theme.colorScheme.outline.withValues(alpha: 0.2),
+                ),
+              ),
+              child: SelectableText(
+                scanResult.link,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(100),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.access_time_rounded,
+                        size: 14,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        _formatDate(scanResult.timestamp),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(100),
+                  ),
+                  child: Text(
+                    'ID: ${scanResult.id.substring(0, 6)}...',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildScoreCard(BuildContext context, Color statusColor) {
+    final theme = Theme.of(context);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.cardTheme.color,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: statusColor.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        Icons.security_rounded,
+                        color: statusColor,
+                        size: 20,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      'مستوى الأمان',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(100),
+                  ),
+                  child: Text(
+                    '${scanResult.score}%',
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: statusColor,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            Stack(
+              children: [
+                Container(
+                  height: 24,
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                FractionallySizedBox(
+                  widthFactor: scanResult.score / 100,
+                  child: Container(
+                    height: 24,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          statusColor.withValues(alpha: 0.7),
+                          statusColor,
+                        ],
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: statusColor.withValues(alpha: 0.3),
+                          blurRadius: 8,
+                          spreadRadius: 1,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildScoreChip(context, 'آمن', scanResult.safe == true, theme.colorScheme.tertiary),
+                _buildScoreChip(context, 'مشبوه', scanResult.safe == null, theme.colorScheme.secondary),
+                _buildScoreChip(context, 'خطير', scanResult.safe == false, theme.colorScheme.error),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildScoreChip(BuildContext context, String label, bool isActive, Color color) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: isActive ? color.withValues(alpha: 0.1) : Colors.transparent,
+        borderRadius: BorderRadius.circular(100),
+        border: Border.all(
+          color: isActive ? color : theme.colorScheme.outline.withValues(alpha: 0.3),
+          width: 1,
+        ),
       ),
       child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.all(12),
+            width: 8,
+            height: 8,
             decoration: BoxDecoration(
-              color: color,
+              color: isActive ? color : theme.colorScheme.outline.withValues(alpha: 0.5),
               shape: BoxShape.circle,
             ),
-            child: Icon(icon, color: Theme.of(context).colorScheme.onPrimary, size: 30),
           ),
-          const SizedBox(width: 15),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  statusText,
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: color,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  scanResult.message,
-                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                ),
-              ],
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: isActive ? color : theme.colorScheme.onSurfaceVariant,
+              fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
             ),
           ),
         ],
@@ -107,294 +472,266 @@ class ResultScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildLinkCard(BuildContext context) {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+  Widget _buildDetailsCard(BuildContext context, Color statusColor) {
+    final theme = Theme.of(context);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.cardTheme.color,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Icon(Icons.link, color: Theme.of(context).colorScheme.primary, size: 20),
-                const SizedBox(width: 8),
-                const Text(
-                  'الرابط المفحوص',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Theme.of(context).colorScheme.outline),
-              ),
-              child: SelectableText(
-                scanResult.link,
-                style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurface),
-              ),
-            ),
-            const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'تاريخ الفحص: ${_formatDate(scanResult.timestamp)}',
-                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.8), fontSize: 12),
-                ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    color: statusColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Text(
-                    'ID: ${scanResult.id.substring(0, 8)}...',
-                    style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.8)),
+                  child: Icon(
+                    Icons.info_rounded,
+                    color: statusColor,
+                    size: 20,
                   ),
                 ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildScoreCard(BuildContext context, Color itemColor) {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'مستوى الأمان',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                ),
+                const SizedBox(width: 12),
                 Text(
-                  '${scanResult.score}%',
-                  style: TextStyle(
-                    fontSize: 24,
+                  'تفاصيل الفحص',
+                  style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
-                    color: itemColor,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 10),
-            Stack(
-              children: [
-                Container(
-                  height: 20,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-                FractionallySizedBox(
-                  widthFactor: scanResult.score / 100,
-                  child: Container(
-                    height: 20,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [
-                          itemColor.withValues(alpha: 0.7),
-                          itemColor,
-                        ],
-                      ),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 15),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                _buildScoreIndicator(context, 'آمن', scanResult.safe == true),
-                _buildScoreIndicator(context, 'مشبوه', scanResult.safe == null),
-                _buildScoreIndicator(context, 'خطير', scanResult.safe == false),
-              ],
-            ),
+            const SizedBox(height: 20),
+            ...scanResult.details.map((detail) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _buildDetailItem(context, detail),
+            )),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildScoreIndicator(BuildContext context, String label, bool isActive) {
-    Color color = label == 'آمن' ? Theme.of(context).colorScheme.tertiary : 
-                  label == 'خطير' ? Theme.of(context).colorScheme.error : Theme.of(context).colorScheme.secondary;
+  Widget _buildDetailItem(BuildContext context, String detail) {
+    final theme = Theme.of(context);
+    final bool isPositive = detail.contains('✓') || detail.contains('آمن');
+    final bool isWarning = detail.contains('⚠') || detail.contains('تحذير');
     
-    return Column(
+    Color itemColor = isPositive 
+        ? theme.colorScheme.tertiary 
+        : isWarning 
+            ? theme.colorScheme.secondary 
+            : theme.colorScheme.onSurfaceVariant;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          width: 12,
-          height: 12,
-          decoration: BoxDecoration(
-            color: isActive ? color : Theme.of(context).colorScheme.surfaceContainerHighest,
-            shape: BoxShape.circle,
+          margin: const EdgeInsets.only(top: 2),
+          child: Icon(
+            isPositive ? Icons.check_circle_rounded : 
+            isWarning ? Icons.warning_rounded : Icons.info_rounded,
+            size: 18,
+            color: itemColor,
           ),
         ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            color: isActive ? color : Theme.of(context).colorScheme.onSurfaceVariant,
-            fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            detail,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurface,
+              height: 1.4,
+            ),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildDetailsCard(BuildContext context) {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+  Widget _buildTechnicalInfo(BuildContext context, Color statusColor) {
+    final theme = Theme.of(context);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.cardTheme.color,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Icon(Icons.info_outline, color: Theme.of(context).colorScheme.primary),
-                const SizedBox(width: 8),
-                const Text(
-                  'تفاصيل الفحص',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                ),
-              ],
-            ),
-            const SizedBox(height: 15),
-            ...scanResult.details.map((detail) => Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(
-                        detail.startsWith('✓') ? Icons.check_circle : 
-                        detail.startsWith('⚠') ? Icons.warning : Icons.circle,
-                        size: 16,
-                        color: detail.startsWith('✓') ? Theme.of(context).colorScheme.tertiary :
-                               detail.startsWith('⚠') ? Theme.of(context).colorScheme.secondary : Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          detail,
-                          style: const TextStyle(fontSize: 14),
-                        ),
-                      ),
-                    ],
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                )),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTechnicalInfo(BuildContext context) {
-    if (scanResult.ipAddress == null && scanResult.domain == null) {
-      return const SizedBox.shrink();
-    }
-
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.dns, color: Theme.of(context).colorScheme.primary),
-                const SizedBox(width: 8),
-                const Text(
+                  child: Icon(
+                    Icons.dns_rounded,
+                    color: statusColor,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(
                   'معلومات تقنية',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 15),
-            if (scanResult.domain != null)
-              _buildInfoRow(context, 'النطاق:', scanResult.domain!),
-            if (scanResult.ipAddress != null)
-              _buildInfoRow(context, 'عنوان IP:', scanResult.ipAddress!),
-            if (scanResult.responseTime > 0)
-              _buildInfoRow(context, 'زمن الاستجابة:', '${scanResult.responseTime.toStringAsFixed(2)} ثانية'),
-            if (scanResult.threatsCount != null)
-              _buildInfoRow(context, 'عدد التهديدات:', scanResult.threatsCount.toString()),
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Column(
+                children: [
+                  if (scanResult.domain != null)
+                    _buildInfoRow(context, 'النطاق', scanResult.domain!, Icons.language_rounded, statusColor),
+                  if (scanResult.domain != null && scanResult.ipAddress != null)
+                    const Divider(height: 16),
+                  if (scanResult.ipAddress != null)
+                    _buildInfoRow(context, 'عنوان IP', scanResult.ipAddress!, Icons.computer_rounded, statusColor),
+                  if ((scanResult.domain != null || scanResult.ipAddress != null) && scanResult.responseTime > 0)
+                    const Divider(height: 16),
+                  if (scanResult.responseTime > 0)
+                    _buildInfoRow(context, 'زمن الاستجابة', '${scanResult.responseTime.toStringAsFixed(2)} ثانية', Icons.timer_rounded, statusColor),
+                  if (scanResult.responseTime > 0 && scanResult.threatsCount != null)
+                    const Divider(height: 16),
+                  if (scanResult.threatsCount != null)
+                    _buildInfoRow(context, 'عدد التهديدات', scanResult.threatsCount.toString(), Icons.warning_rounded, 
+                      scanResult.threatsCount! > 0 ? theme.colorScheme.error : theme.colorScheme.tertiary),
+                ],
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildInfoRow(BuildContext context, String label, String value) {
+  Widget _buildInfoRow(BuildContext context, String label, String value, IconData icon, Color color) {
+    final theme = Theme.of(context);
+
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         children: [
+          Icon(
+            icon,
+            size: 18,
+            color: color,
+          ),
+          const SizedBox(width: 12),
           Text(
-            label,
-            style: TextStyle(fontWeight: FontWeight.w500, color: Theme.of(context).colorScheme.onSurfaceVariant),
+            '$label:',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
           ),
           const SizedBox(width: 8),
-          Text(
-            value,
-            style: const TextStyle(fontWeight: FontWeight.w500),
+          Expanded(
+            child: Text(
+              value,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: theme.colorScheme.onSurface,
+              ),
+              textAlign: TextAlign.left,
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildActionButtons(BuildContext context, Color itemColor) {
+  Widget _buildActionButtons(BuildContext context, Color statusColor) {
+    final theme = Theme.of(context);
+
     return Row(
       children: [
         Expanded(
-          child: ElevatedButton.icon(
+          child: ElevatedButton(
             onPressed: () => _navigateToPage(context),
-            icon: const Icon(Icons.open_in_browser),
-            label: const Text('فتح الرابط'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: itemColor,
-              foregroundColor: Theme.of(context).colorScheme.onPrimary,
-              padding: const EdgeInsets.symmetric(vertical: 15),
+              backgroundColor: statusColor,
+              foregroundColor: theme.colorScheme.onPrimary,
+              padding: const EdgeInsets.symmetric(vertical: 16),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(16),
               ),
+              elevation: 2,
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.open_in_browser_rounded),
+                const SizedBox(width: 8),
+                Text(
+                  scanResult.safe == false ? 'فتح على مسؤوليتي' : 'فتح الرابط',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
             ),
           ),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 12),
         Expanded(
-          child: OutlinedButton.icon(
+          child: OutlinedButton(
             onPressed: () => Navigator.pop(context),
-            icon: const Icon(Icons.arrow_back),
-            label: const Text('رجوع'),
             style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 15),
+              padding: const EdgeInsets.symmetric(vertical: 16),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(16),
               ),
-              side: BorderSide(color: Theme.of(context).colorScheme.outline),
+              side: BorderSide(
+                color: theme.colorScheme.outline,
+                width: 1,
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.arrow_back_rounded),
+                const SizedBox(width: 8),
+                Text(
+                  'رجوع',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -412,16 +749,30 @@ class ResultScreen extends StatelessWidget {
       final shouldProceed = await showDialog(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('تحذير!'),
-          content: const Text('هذا الرابط قد يكون خطيراً. هل أنت متأكد من المتابعة؟'),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: Row(
+            children: [
+              Icon(
+                Icons.warning_amber_rounded,
+                color: Theme.of(context).colorScheme.error,
+              ),
+              const SizedBox(width: 10),
+              const Text('تحذير!'),
+            ],
+          ),
+          content: const Text(
+            'هذا الرابط قد يكون خطيراً. هل أنت متأكد من المتابعة؟',
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
               child: const Text('إلغاء'),
             ),
-            ElevatedButton(
+            FilledButton(
               onPressed: () => Navigator.pop(context, true),
-              style: ElevatedButton.styleFrom(
+              style: FilledButton.styleFrom(
                 backgroundColor: Theme.of(context).colorScheme.error,
                 foregroundColor: Theme.of(context).colorScheme.onError,
               ),
@@ -436,45 +787,73 @@ class ResultScreen extends StatelessWidget {
 
     try {
       final Uri uri = Uri.parse(url);
-      debugPrint('محاولة فتح الرابط: $uri');
-      
       await launchUrl(
         uri,
         mode: LaunchMode.externalApplication,
       );
-      
     } catch (e) {
-      debugPrint('خطأ في فتح الرابط: $e');
-      
-      try {
-        final Uri uri = Uri.parse(url.replaceFirst('https://', 'http://'));
-        await launchUrl(
-          uri,
-          mode: LaunchMode.externalApplication,
-        );
-      } catch (e2) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('لا يمكن فتح هذا الرابط. يرجى التحقق من صحة الرابط'),
-              backgroundColor: Theme.of(context).colorScheme.error,
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(
+                  Icons.error_outline_rounded,
+                  color: Theme.of(context).colorScheme.onError,
+                ),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text('لا يمكن فتح هذا الرابط'),
+                ),
+              ],
             ),
-          );
-        }
+            backgroundColor: Theme.of(context).colorScheme.error,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        );
       }
     }
   }
 
   void _shareResult(BuildContext context) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('سيتم إضافة ميزة المشاركة قريباً'),
-        duration: Duration(seconds: 2),
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(
+              Icons.info_rounded,
+              color: Theme.of(context).colorScheme.onPrimary,
+            ),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text('سيتم إضافة ميزة المشاركة قريباً'),
+            ),
+          ],
+        ),
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
       ),
     );
   }
 
   String _formatDate(DateTime date) {
-    return '${date.year}/${date.month}/${date.day} ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final yesterday = today.subtract(const Duration(days: 1));
+    final scanDate = DateTime(date.year, date.month, date.day);
+
+    if (scanDate == today) {
+      return 'اليوم ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
+    } else if (scanDate == yesterday) {
+      return 'أمس ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
+    } else {
+      return '${date.day}/${date.month}/${date.year}';
+    }
   }
 }

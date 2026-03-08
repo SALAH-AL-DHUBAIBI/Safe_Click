@@ -1,9 +1,12 @@
+// lib/features/scan/presentation/controllers/scan_notifier.dart
+
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:safeclik/features/scan/data/models/scan_result.dart';
 import 'package:safeclik/features/scan/domain/entities/scan_entity.dart';
+import 'package:safeclik/features/scan/domain/repositories/scan_repository.dart';
 import 'package:safeclik/features/scan/domain/usecases/clear_history_usecase.dart';
 import 'package:safeclik/features/scan/domain/usecases/delete_scan_usecase.dart';
 import 'package:safeclik/features/scan/domain/usecases/get_scan_history_usecase.dart';
@@ -21,13 +24,12 @@ final scanNotifierProvider = StateNotifierProvider<ScanNotifier, ScanState>(
 class ScanNotifier extends StateNotifier<ScanState> {
   final ScanLinkUseCase _scanLinkUseCase = sl<ScanLinkUseCase>();
   final GetScanHistoryUseCase _getHistoryUseCase = sl<GetScanHistoryUseCase>();
-  final DeleteScanUseCase _deleteUseCase = sl<DeleteScanUseCase>();
+  final DeleteScanUseCase _deleteUseCase = sl<DeleteScanUseCase>(); // سنستخدمه للـ soft delete
   final ClearHistoryUseCase _clearUseCase = sl<ClearHistoryUseCase>();
   final SaveHistoryUseCase _saveHistoryUseCase = sl<SaveHistoryUseCase>();
   final ScanCacheService _scanCache = sl<ScanCacheService>();
 
   ScanNotifier() : super(const ScanState()) {
-    // Phase 3: Purge expired cache entries at startup
     _scanCache.purgeExpired();
     _loadHistory();
   }
@@ -45,6 +47,7 @@ class ScanNotifier extends StateNotifier<ScanState> {
         ipAddress: e.ipAddress,
         domain: e.domain,
         threatsCount: e.threatsCount,
+        source: e.source,
       );
 
   ScanEntity _toEntity(ScanResult r) => ScanEntity(
@@ -60,67 +63,69 @@ class ScanNotifier extends StateNotifier<ScanState> {
         ipAddress: r.ipAddress,
         domain: r.domain,
         threatsCount: r.threatsCount,
+        source: r.source,
       );
 
   int _countDangerous(List<ScanResult> history) =>
       history.where((s) => s.safe == false).length;
 
-  // LOCAL-FIRST: show local data immediately, then sync from server in background
   Future<void> _loadHistory() async {
     try {
-      // Step 1: Instant local data
       final entities = await _getHistoryUseCase();
       final results = entities.map(_toResult).toList();
       state = state.copyWith(
         scanHistory: results,
         dangerousScans: _countDangerous(results),
       );
+      debugPrint('📂 [Load] Loaded ${results.length} records from local storage');
     } catch (e) {
-      debugPrint('خطأ في تحميل السجل المحلي: $e');
+      debugPrint('⚠️ [Load] Error loading history: $e');
     }
-    // Step 2: Background sync with server (does NOT block UI)
     _syncHistoryFromServer();
   }
 
-  /// Silently sync history from server and update state if new data arrives.
   Future<void> _syncHistoryFromServer() async {
     try {
       final repo = sl<ScanRepositoryImpl>();
       final entities = await repo.syncHistoryFromRemote();
       if (!mounted) return;
       final results = entities.map(_toResult).toList();
-      // Only update if server returned different data
+      
       if (results.length != state.scanHistory.length ||
-          (results.isNotEmpty &&
-              state.scanHistory.isNotEmpty &&
-              results.first.id != state.scanHistory.first.id)) {
+          (results.isNotEmpty && 
+           state.scanHistory.isNotEmpty && 
+           results.first.id != state.scanHistory.first.id)) {
         state = state.copyWith(
           scanHistory: results,
           dangerousScans: _countDangerous(results),
         );
-        debugPrint('🔄 [ScanNotifier] History updated from server: ${results.length} items');
+        debugPrint('🔄 [Sync] Updated from server: ${results.length} items');
       }
     } catch (e) {
-      debugPrint('🔴 [ScanNotifier] Background sync error: $e');
+      debugPrint('🔴 [Sync] Background sync error: $e');
     }
   }
 
-  /// Public: call on pull-to-refresh.
   Future<void> refreshHistory() => _syncHistoryFromServer();
 
   Future<ScanResult?> scanLink(String link) async {
-    // Phase B: Scan concurrent block
     if (state.isScanning) return null;
 
     try {
-      state = state.copyWith(isScanning: true, clearError: true);
+      state = state.copyWith(isScanning: true, lastError: null);
 
       final entity = await _scanLinkUseCase(link);
 
       if (entity == null) throw Exception('تعذر فحص الرابط');
 
       final result = _toResult(entity);
-      final newHistory = [result, ...state.scanHistory];
+      
+      var newHistory = [result, ...state.scanHistory];
+      
+      if (newHistory.length > ScanRepository.maxHistoryItems) {
+        newHistory = newHistory.sublist(0, ScanRepository.maxHistoryItems);
+        debugPrint('📊 [Limit] History trimmed to ${ScanRepository.maxHistoryItems} items');
+      }
 
       await _saveHistoryUseCase(newHistory.map(_toEntity).toList());
 
@@ -130,53 +135,176 @@ class ScanNotifier extends StateNotifier<ScanState> {
         isScanning: false,
       );
 
-      debugPrint('✅ تم حفظ نتيجة الفحص');
+      debugPrint('✅ [Scan] Success: ${result.link} (Total: ${newHistory.length})');
       return result;
     } catch (e) {
       final errorMessage = e.toString().replaceFirst('Exception: ', '');
-      debugPrint('❌ خطأ في الفحص: $errorMessage');
+      debugPrint('❌ [Scan] Error: $errorMessage');
       state = state.copyWith(lastError: errorMessage, isScanning: false);
       return null;
     }
   }
 
   Future<void> clearHistory() async {
+    debugPrint('🗑️ [Clear] Starting clear history...');
+    state = state.copyWith(isLoading: true);
+    
     try {
       final success = await _clearUseCase();
+      debugPrint('🗑️ [Clear] UseCase result: $success');
+      
+      if (success) {
+        await _saveHistoryUseCase([]);
+        
+        state = state.copyWith(
+          scanHistory: [],
+          dangerousScans: 0,
+          isLoading: false,
+          lastError: null,
+        );
+        debugPrint('✅ [Clear] History cleared successfully');
+      } else {
+        // محاولة المسح المحلي
+        await _saveHistoryUseCase([]);
+        
+        state = state.copyWith(
+          scanHistory: [],
+          dangerousScans: 0,
+          isLoading: false,
+        );
+        debugPrint('✅ [Clear] Local clear successful');
+      }
+    } catch (e) {
+      debugPrint('🔴 [Clear] Error: $e');
+      
+      try {
+        await _saveHistoryUseCase([]);
+        state = state.copyWith(
+          scanHistory: [],
+          dangerousScans: 0,
+          isLoading: false,
+        );
+      } catch (localError) {
+        state = state.copyWith(
+          isLoading: false,
+          lastError: 'فشل مسح السجل: $e',
+        );
+      }
+    }
+  }
+
+
+Future<void> softDeleteScanResult(String id) async {
+    debugPrint('🗑️ [SoftDelete] Starting for ID: $id');
+    state = state.copyWith(isLoading: true);
+    
+    try {
+      // Soft delete through repository
+      final success = await _deleteUseCase(id); // This now does soft delete
+      
+      if (success) {
+        // Remove from local state
+        final newHistory = state.scanHistory.where((s) => s.id != id).toList();
+        
+        state = state.copyWith(
+          scanHistory: newHistory,
+          dangerousScans: _countDangerous(newHistory),
+          isLoading: false,
+        );
+        
+        debugPrint('✅ [SoftDelete] Successfully hid scan: $id');
+      } else {
+        state = state.copyWith(
+          isLoading: false,
+          lastError: 'فشل إخفاء الفحص',
+        );
+      }
+    } catch (e) {
+      debugPrint('🔴 [SoftDelete] Error: $e');
+      state = state.copyWith(
+        isLoading: false,
+        lastError: 'حدث خطأ: $e',
+      );
+    }
+  }
+
+  Future<void> clearUserHistory() async {
+    debugPrint('🗑️ [SoftDelete] Clearing all user history...');
+    state = state.copyWith(isLoading: true);
+    
+    try {
+      final success = await _clearUseCase(); // This now does soft delete for all
+      
       if (success) {
         state = state.copyWith(
           scanHistory: [],
           dangerousScans: 0,
-          clearError: true,
+          isLoading: false,
+          lastError: null,
         );
+        debugPrint('✅ [SoftDelete] All scans hidden from user');
       } else {
-        state = state.copyWith(lastError: 'فشل مسح السجل من الخادم');
+        state = state.copyWith(
+          isLoading: false,
+          lastError: 'فشل إخفاء السجل',
+        );
       }
-    } catch (_) {
-      state = state.copyWith(lastError: 'خطأ في مسح السجل');
+    } catch (e) {
+      debugPrint('🔴 [SoftDelete] Error: $e');
+      state = state.copyWith(
+        isLoading: false,
+        lastError: 'حدث خطأ: $e',
+      );
     }
   }
-
+  
   Future<void> deleteScanResult(String id) async {
+    debugPrint('🗑️ [Delete] Starting delete for ID: $id');
+    state = state.copyWith(isLoading: true);
+    
     try {
       final success = await _deleteUseCase(id);
+      debugPrint('🗑️ [Delete] UseCase result: $success');
+      
+      // حذف محلي دائماً
+      final newHistory = state.scanHistory.where((s) => s.id != id).toList();
+      
+      // حفظ التغييرات
+      await _saveHistoryUseCase(newHistory.map(_toEntity).toList());
+      
+      state = state.copyWith(
+        scanHistory: newHistory,
+        dangerousScans: _countDangerous(newHistory),
+        isLoading: false,
+      );
+      
       if (success) {
-        final newHistory =
-            state.scanHistory.where((s) => s.id != id).toList();
+        debugPrint('✅ [Delete] Successfully deleted ID: $id');
+      } else {
+        debugPrint('✅ [Delete] Local delete only for ID: $id');
+      }
+    } catch (e) {
+      debugPrint('🔴 [Delete] Error: $e');
+      
+      // محاولة الحذف المحلي كحل أخير
+      try {
+        final newHistory = state.scanHistory.where((s) => s.id != id).toList();
         await _saveHistoryUseCase(newHistory.map(_toEntity).toList());
         state = state.copyWith(
           scanHistory: newHistory,
           dangerousScans: _countDangerous(newHistory),
+          isLoading: false,
         );
-      } else {
-        state = state.copyWith(lastError: 'فشل حذف الفحص');
+      } catch (localError) {
+        state = state.copyWith(
+          isLoading: false,
+          lastError: 'فشل حذف الفحص: $e',
+        );
       }
-    } catch (_) {
-      state = state.copyWith(lastError: 'خطأ في حذف الفحص');
     }
   }
 
-  void clearError() => state = state.copyWith(clearError: true);
+  void clearError() => state = state.copyWith(lastError: null);
 
   void reset() {
     state = const ScanState();
@@ -211,7 +339,6 @@ class ScanNotifier extends StateNotifier<ScanState> {
       };
     }
 
-    // Phase 3: Single-pass fold — O(n) instead of O(4n)
     final Map<String, int> byDay = {};
     final result = h.fold(
       <String, dynamic>{'safe': 0, 'dangerous': 0, 'suspicious': 0, 'scoreSum': 0},
@@ -279,6 +406,4 @@ class ScanNotifier extends StateNotifier<ScanState> {
           scan.details.any((d) => d.toLowerCase().contains(lower));
     }).toList();
   }
-
-  // Phase 4: enableVirusTotal() removed — VirusTotal is no longer used from Flutter.
 }

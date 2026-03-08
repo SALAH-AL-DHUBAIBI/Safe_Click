@@ -6,20 +6,21 @@ abstract class ScanRepository {
   /// Scan a URL. Returns a [ScanEntity] or null on unrecoverable failure.
   Future<ScanEntity?> scanLink(String link);
 
-  /// Fetch scan history — LOCAL FIRST (returns local data instantly).
+  /// Fetch scan history for current user (excludes soft-deleted items)
   Future<List<ScanEntity>> getScanHistory();
 
   /// Sync history from remote server and persist locally.
-  /// Call this in the background after [getScanHistory] returns local data.
   Future<List<ScanEntity>> syncHistoryFromRemote();
 
-  /// Delete a single scan record by id. Returns true on success.
-  Future<bool> deleteScan(String id);
+  /// Soft delete a scan record (hide from user only)
+  Future<bool> softDeleteScan(String id);
 
-  /// Clear the entire scan history (remote + local). Returns true on success.
-  Future<bool> clearHistory();
+  /// Clear history for user (soft delete all)
+  Future<bool> clearUserHistory();
 
   /// Persist [history] to local storage.
   Future<void> saveHistory(List<ScanEntity> history);
+  
+  /// Maximum number of scans to keep in history
+  static const int maxHistoryItems = 50;
 }
-

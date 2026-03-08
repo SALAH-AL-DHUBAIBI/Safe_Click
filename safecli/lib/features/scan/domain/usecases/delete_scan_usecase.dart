@@ -6,5 +6,6 @@ class DeleteScanUseCase {
   final ScanRepository _repository;
   DeleteScanUseCase(this._repository);
 
-  Future<bool> call(String id) => _repository.deleteScan(id);
+  /// Soft delete a scan (hide from user only)
+  Future<bool> call(String id) => _repository.softDeleteScan(id);
 }
