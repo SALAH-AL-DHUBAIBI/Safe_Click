@@ -4,7 +4,8 @@ import 'package:safeclik/features/settings/presentation/providers/settings_contr
 import 'package:safeclik/features/scan/presentation/controllers/scan_notifier.dart';
 import 'package:safeclik/features/profile/presentation/widgets/stats_card.dart';
 import 'package:safeclik/features/scan/presentation/pages/result_screen.dart';
-
+import 'dart:io';
+import 'dart:async';
 
 class MainScreen extends ConsumerStatefulWidget {
   const MainScreen({super.key});
@@ -40,7 +41,26 @@ class _MainScreenState extends ConsumerState<MainScreen> with TickerProviderStat
     _animationController.dispose();
     super.dispose();
   }
+Future<bool> _checkInternetConnectivity() async {
+  try {
+    final result = await InternetAddress.lookup('google.com');
+    return result.isNotEmpty && result[0].rawAddress.isNotEmpty;
+  } on SocketException catch (_) {
+    return false;
+  }
+}
 
+Future<bool> _checkInternetSpeed() async {
+  try {
+    final stopwatch = Stopwatch()..start();
+    await InternetAddress.lookup('google.com').timeout(const Duration(seconds: 3));
+    stopwatch.stop();
+    // إذا استغرق الرد أكثر من 2 ثانية، نعتبر النت بطيء
+    return stopwatch.elapsedMilliseconds < 4000;
+  } catch (_) {
+    return false;
+  }
+}
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -102,7 +122,7 @@ class _MainScreenState extends ConsumerState<MainScreen> with TickerProviderStat
           ),
           const SizedBox(height: 10),
           Text(
-            'Safe Clik',
+            'Safe Click',
             style: TextStyle(
               fontSize: 28,
               fontWeight: FontWeight.bold,
@@ -287,23 +307,114 @@ class _MainScreenState extends ConsumerState<MainScreen> with TickerProviderStat
   }
 
   Future<void> _performScan(BuildContext context) async {
-    if (ref.read(scanNotifierProvider).isScanning) return;
+  if (ref.read(scanNotifierProvider).isScanning) return;
 
-    if (_linkController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('يرجى إدخال رابط لفحصه'),
-          backgroundColor: Theme.of(context).colorScheme.error,
-          behavior: SnackBarBehavior.floating,
+  if (_linkController.text.trim().isEmpty) {
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('يرجى إدخال رابط لفحصه'),
+        backgroundColor: Theme.of(context).colorScheme.error,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+    return;
+  }
+
+  // التحقق من الاتصال بالإنترنت
+  final hasInternet = await _checkInternetConnectivity();
+  if (!hasInternet) {
+    if (!context.mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: Icon(
+          Icons.wifi_off_rounded,
+          color: Theme.of(context).colorScheme.error,
+          size: 48,
         ),
-      );
-      return;
-    }
+        title: const Text('لا يوجد اتصال بالإنترنت'),
+        content: const Text(
+          'يرجى التحقق من اتصالك بالإنترنت والمحاولة مرة أخرى.\n\n'
+          'تأكد من:'
+          '\n• تفعيل الواي فاي أو البيانات'
+          '\n• استقرار الشبكة'
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('حسناً'),
+          ),
+        ],
+      ),
+    );
+    return;
+  }
 
+  // التحقق من سرعة الإنترنت
+  final isSpeedGood = await _checkInternetSpeed();
+  if (!isSpeedGood) {
+    if (!context.mounted) return;
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: Icon(
+          Icons.speed,
+          color: Colors.orange,
+          size: 48,
+        ),
+        title: const Text('اتصال الإنترنت بطيء'),
+        content: const Text(
+          'اتصال الإنترنت الحالي بطيء وقد يستغرق الفحص وقتاً أطول من المعتاد.\n\n'
+          'هل تريد المتابعة على أي حال؟'
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('إلغاء'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('متابعة على أي حال'),
+          ),
+        ],
+      ),
+    );
+    
+    if (proceed != true) return;
+    
+    // عرض مؤشر مع رسالة توضيحية
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Row(
+          children: [
+            Icon(Icons.warning_amber, color: Colors.white, size: 20),
+            SizedBox(width: 8),
+            Expanded(child: Text('جاري الفحص... قد يستغرق وقتاً أطول بسبب بطء الاتصال')),
+          ],
+        ),
+        backgroundColor: Colors.orange,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  // محاولة الفحص مع timeout
+  try {
     final result = await ref
         .read(scanNotifierProvider.notifier)
-        .scanLink(_linkController.text.trim());
+        .scanLink(_linkController.text.trim())
+        .timeout(
+          const Duration(seconds: 30),
+          onTimeout: () {
+            throw TimeoutException('استغرق الفحص وقتاً طويلاً');
+          },
+        );
 
     if (!context.mounted) return;
 
@@ -333,7 +444,49 @@ class _MainScreenState extends ConsumerState<MainScreen> with TickerProviderStat
         ),
       );
     }
+  } on TimeoutException catch (_) {
+    if (!context.mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: Icon(
+          Icons.timer_off,
+          color: Colors.orange,
+          size: 48,
+        ),
+        title: const Text('انتهت مهلة الفحص'),
+        content: const Text(
+          'استغرق الفحص وقتاً طويلاً جداً. هذا قد يكون بسبب:\n'
+          '• ضعف شديد في الاتصال\n'
+          '• مشكلة في الخادم\n'
+          '• الرابط غير مستجيب\n\n'
+          'يرجى المحاولة مرة أخرى لاحقاً.'
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('حسناً'),
+          ),
+        ],
+      ),
+    );
+  } catch (e) {
+    if (!context.mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('خطأ في الفحص'),
+        content: Text('حدث خطأ غير متوقع: $e'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('موافق'),
+          ),
+        ],
+      ),
+    );
   }
+}
 
   void shareApp() {
     ScaffoldMessenger.of(context).showSnackBar(

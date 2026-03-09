@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:safeclik/features/scan/presentation/controllers/scan_notifier.dart';
@@ -18,13 +19,18 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> with SingleTicker
   final TextEditingController _searchController = TextEditingController();
   bool _isSearching = false;
 
+  // 🗑️ متغيرات للتراجع عن الحذف الفردي
+  ScanResult? _lastDeletedScan;
+  Timer? _undoTimer;
+
+  // 🗑️ متغيرات للتراجع عن حذف الكل
+  List<ScanResult>? _lastDeletedAllScans;
+  Timer? _undoAllTimer;
+
   @override
   void initState() {
     super.initState();
-    // تغيير length إلى 4 (الكل، آمن، مشبوه، خطر)
     _tabController = TabController(length: 4, vsync: this);
-    
-    // التأكد من أن القيمة الأولية صحيحة
     _tabController.addListener(_handleTabSelection);
   }
 
@@ -44,6 +50,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> with SingleTicker
     _tabController.removeListener(_handleTabSelection);
     _tabController.dispose();
     _searchController.dispose();
+    _undoTimer?.cancel();
+    _undoAllTimer?.cancel();
     super.dispose();
   }
 
@@ -77,6 +85,162 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> with SingleTicker
     }
   }
 
+  // 🔄 دالة التراجع عن الحذف الفردي
+  void _undoDelete() {
+    if (_lastDeletedScan == null) return;
+    
+    try {
+      // إعادة الرابط المحذوف إلى التاريخ
+      ref.read(scanNotifierProvider.notifier).addScanResult(_lastDeletedScan!);
+      
+      // إخفاء أي رسائل سابقة
+      ScaffoldMessenger.of(context).clearSnackBars();
+      
+      // إظهار رسالة تأكيد التراجع
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.undo, color: Colors.white, size: 16),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'تم التراجع عن الحذف',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    Text(
+                      _lastDeletedScan!.link.length > 40 
+                          ? '${_lastDeletedScan!.link.substring(0, 40)}...' 
+                          : _lastDeletedScan!.link,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.white.withValues(alpha: 0.9),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.blue,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+      
+      // مسح الرابط المحفوظ
+      _lastDeletedScan = null;
+      _undoTimer?.cancel();
+      
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.error_outline, color: Colors.white),
+              const SizedBox(width: 12),
+              Expanded(child: Text('فشل التراجع عن الحذف: $e')),
+            ],
+          ),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
+  // 🔄 دالة التراجع عن حذف الكل
+  void _undoDeleteAll() {
+    if (_lastDeletedAllScans == null || _lastDeletedAllScans!.isEmpty) return;
+    
+    try {
+      // إعادة جميع الروابط المحذوفة
+      for (var scan in _lastDeletedAllScans!) {
+        ref.read(scanNotifierProvider.notifier).addScanResult(scan);
+      }
+      
+      // إخفاء أي رسائل سابقة
+      ScaffoldMessenger.of(context).clearSnackBars();
+      
+      // إظهار رسالة تأكيد التراجع
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.undo, color: Colors.white, size: 16),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'تم التراجع عن حذف الكل',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    Text(
+                      'تم استعادة ${_lastDeletedAllScans!.length} فحص',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.white.withValues(alpha: 0.9),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.blue,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+      
+      // مسح القائمة المحفوظة
+      _lastDeletedAllScans = null;
+      _undoAllTimer?.cancel();
+      
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.error_outline, color: Colors.white),
+              const SizedBox(width: 12),
+              Expanded(child: Text('فشل التراجع عن الحذف: $e')),
+            ],
+          ),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final scanHistory = ref.watch(scanNotifierProvider).scanHistory;
@@ -100,7 +264,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> with SingleTicker
                     : _buildHeader(theme, scanHistory),
               ),
 
-              // تبويبات أنيقة (تظهر فقط عندما لا يكون البحث نشطاً)
+              // تبويبات أنيقة
               if (!_isSearching)
                 Container(
                   margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
@@ -240,7 +404,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> with SingleTicker
         ),
         Row(
           children: [
-            // 🔍 زر البحث
             if (scanHistory.isNotEmpty)
               Container(
                 margin: const EdgeInsets.only(right: 8),
@@ -249,16 +412,11 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> with SingleTicker
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: IconButton(
-                  icon: Icon(
-                    Icons.search_rounded,
-                    color: theme.colorScheme.primary,
-                    size: 22,
-                  ),
+                  icon: Icon(Icons.search_rounded, color: theme.colorScheme.primary, size: 22),
                   onPressed: _startSearch,
                   tooltip: 'بحث',
                 ),
               ),
-            // زر المسح
             if (scanHistory.isNotEmpty)
               Container(
                 decoration: BoxDecoration(
@@ -266,11 +424,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> with SingleTicker
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: IconButton(
-                  icon: Icon(
-                    Icons.delete_sweep_rounded,
-                    color: theme.colorScheme.error,
-                    size: 22,
-                  ),
+                  icon: Icon(Icons.delete_sweep_rounded, color: theme.colorScheme.error, size: 22),
                   onPressed: () => _confirmClearHistory(context, ref),
                   tooltip: 'مسح الكل',
                 ),
@@ -281,16 +435,13 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> with SingleTicker
     );
   }
 
-  // 🔍 شريط البحث
   Widget _buildSearchBar(ThemeData theme) {
     return Container(
       height: 56,
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: theme.colorScheme.primary.withValues(alpha: 0.3),
-        ),
+        border: Border.all(color: theme.colorScheme.primary.withValues(alpha: 0.3)),
       ),
       child: Row(
         children: [
@@ -307,10 +458,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> with SingleTicker
                 border: InputBorder.none,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 16),
                 suffixIcon: IconButton(
-                  icon: Icon(
-                    Icons.close,
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
+                  icon: Icon(Icons.close, color: theme.colorScheme.onSurfaceVariant),
                   onPressed: _stopSearch,
                 ),
               ),
@@ -362,9 +510,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> with SingleTicker
               style: ElevatedButton.styleFrom(
                 backgroundColor: theme.colorScheme.primary,
                 foregroundColor: theme.colorScheme.onPrimary,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(100),
-                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(100)),
               ),
             ),
           ],
@@ -420,7 +566,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> with SingleTicker
 
     return Expanded(
       child: GestureDetector(
-        onTap: () => _changeTab(index), // استخدام الدالة الآمنة
+        onTap: () => _changeTab(index),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 250),
           curve: Curves.easeInOut,
@@ -488,10 +634,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> with SingleTicker
       decoration: BoxDecoration(
         color: theme.cardTheme.color,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: statusColor.withValues(alpha: 0.2),
-          width: 1,
-        ),
+        border: Border.all(color: statusColor.withValues(alpha: 0.2), width: 1),
       ),
       child: Material(
         color: Colors.transparent,
@@ -542,9 +685,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> with SingleTicker
                         scan.link,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
+                        style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
                       ),
                       const SizedBox(height: 6),
                       Row(
@@ -558,11 +699,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> with SingleTicker
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(
-                                  Icons.security,
-                                  size: 12,
-                                  color: statusColor,
-                                ),
+                                Icon(Icons.security, size: 12, color: statusColor),
                                 const SizedBox(width: 4),
                                 Text(
                                   '${scan.score}%',
@@ -598,16 +735,9 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> with SingleTicker
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: IconButton(
-                    icon: Icon(
-                      Icons.close_rounded,
-                      size: 18,
-                      color: theme.colorScheme.error,
-                    ),
-                    onPressed: () => _confirmDeleteScan(context, scan.id, ref),
-                    constraints: const BoxConstraints(
-                      minWidth: 36,
-                      minHeight: 36,
-                    ),
+                    icon: Icon(Icons.close_rounded, size: 18, color: theme.colorScheme.error),
+                    onPressed: () => _confirmDeleteScan(context, scan, ref),
+                    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
                     padding: EdgeInsets.zero,
                   ),
                 ),
@@ -636,63 +766,44 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> with SingleTicker
 
   IconData _getEmptyIcon(int selectedIndex) {
     switch (selectedIndex) {
-      case 0:
-        return Icons.history_outlined;
-      case 1:
-        return Icons.check_circle_outline;
-      case 2:
-        return Icons.warning_amber_outlined;
-      case 3:
-        return Icons.dangerous_outlined;
-      default:
-        return Icons.history_outlined;
+      case 0: return Icons.history_outlined;
+      case 1: return Icons.check_circle_outline;
+      case 2: return Icons.warning_amber_outlined;
+      case 3: return Icons.dangerous_outlined;
+      default: return Icons.history_outlined;
     }
   }
 
   Color _getEmptyIconColor(ThemeData theme, int selectedIndex) {
     switch (selectedIndex) {
-      case 1:
-        return theme.colorScheme.tertiary;
-      case 2:
-        return theme.colorScheme.secondary;
-      case 3:
-        return theme.colorScheme.error;
-      default:
-        return theme.colorScheme.primary;
+      case 1: return theme.colorScheme.tertiary;
+      case 2: return theme.colorScheme.secondary;
+      case 3: return theme.colorScheme.error;
+      default: return theme.colorScheme.primary;
     }
   }
 
   String _getEmptyMessage(int selectedIndex) {
     switch (selectedIndex) {
-      case 0:
-        return 'لا يوجد سجل فحوصات';
-      case 1:
-        return 'لا توجد روابط آمنة';
-      case 2:
-        return 'لا توجد روابط مشبوهة';
-      case 3:
-        return 'لا توجد روابط خطرة';
-      default:
-        return '';
+      case 0: return 'لا يوجد سجل فحوصات';
+      case 1: return 'لا توجد روابط آمنة';
+      case 2: return 'لا توجد روابط مشبوهة';
+      case 3: return 'لا توجد روابط خطرة';
+      default: return '';
     }
   }
 
   String _getEmptySubMessage(int selectedIndex) {
     switch (selectedIndex) {
-      case 0:
-        return 'قم بفحص رابط جديد ليظهر هنا';
-      case 1:
-        return 'جميع الروابط التي قمت بفحصها آمنة';
-      case 2:
-        return 'لم تصادف أي روابط مشبوهة حتى الآن';
-      case 3:
-        return 'لم تصادف أي روابط خطرة حتى الآن';
-      default:
-        return '';
+      case 0: return 'قم بفحص رابط جديد ليظهر هنا';
+      case 1: return 'جميع الروابط التي قمت بفحصها آمنة';
+      case 2: return 'لم تصادف أي روابط مشبوهة حتى الآن';
+      case 3: return 'لم تصادف أي روابط خطرة حتى الآن';
+      default: return '';
     }
   }
 
-  Future<void> _confirmDeleteScan(BuildContext context, String id, WidgetRef ref) async {
+  Future<void> _confirmDeleteScan(BuildContext context, ScanResult scan, WidgetRef ref) async {
     final shouldDelete = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -704,7 +815,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> with SingleTicker
             Text('حذف الفحص'),
           ],
         ),
-        content: const Text('هل أنت متأكد من حذف هذا الفحص؟'),
+        content: Text('هل أنت متأكد من حذف الفحص: ${scan.link.length > 30 ? '${scan.link.substring(0, 30)}...' : scan.link}؟'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -723,11 +834,114 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> with SingleTicker
     );
 
     if (shouldDelete == true) {
-      await ref.read(scanNotifierProvider.notifier).softDeleteScanResult(id);
+      try {
+        // إلغاء أي تايمر سابق
+        _undoTimer?.cancel();
+        
+        // حفظ الرابط المحذوف قبل الحذف للتراجع
+        _lastDeletedScan = scan;
+        
+        // حذف الرابط
+        await ref.read(scanNotifierProvider.notifier).softDeleteScanResult(scan.id);
+        
+        if (!context.mounted) return;
+        
+        final linkPreview = scan.link.length > 30 
+            ? '${scan.link.substring(0, 30)}...' 
+            : scan.link;
+        
+        // مسح أي رسائل سابقة قبل إظهار الرسالة الجديدة
+        ScaffoldMessenger.of(context).clearSnackBars();
+        
+        // إظهار رسالة نجاح الحذف مع زر التراجع (تظهر لمدة 5 ثواني ثم تختفي)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.check, color: Colors.white, size: 16),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'تم الحذف بنجاح',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      Text(
+                        linkPreview,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.white.withValues(alpha: 0.9),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        'سيتم إغلاق هذه الرسالة بعد 5 ثواني',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.white.withValues(alpha: 0.7),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 5), // 👈 5 ثواني بالضبط ثم تختفي تلقائياً
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            action: SnackBarAction(
+              label: 'تراجع',
+              textColor: Colors.white,
+              onPressed: _undoDelete,
+            ),
+          ),
+        );
+        
+        // تايمر لمسح الرابط المحفوظ بعد انتهاء مدة التراجع (5 ثواني)
+        _undoTimer = Timer(const Duration(seconds: 5), () {
+          if (mounted) {
+            setState(() {
+              _lastDeletedScan = null;
+            });
+          }
+        });
+        
+      } catch (e) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.error_outline, color: Colors.white),
+                const SizedBox(width: 12),
+                Expanded(child: Text('حدث خطأ أثناء الحذف: $e')),
+              ],
+            ),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
     }
   }
 
   Future<void> _confirmClearHistory(BuildContext context, WidgetRef ref) async {
+    final scanHistory = ref.read(scanNotifierProvider).scanHistory;
+    final historyCount = scanHistory.length;
+    
     final shouldClear = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -745,11 +959,27 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> with SingleTicker
           children: [
             const Text('هل أنت متأكد من مسح جميع الفحوصات السابقة؟'),
             const SizedBox(height: 8),
-            Text(
-              'سيتم مسح ${ref.read(scanNotifierProvider).scanHistory.length} فحص',
-              style: TextStyle(
-                fontSize: 12,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.error.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Theme.of(context).colorScheme.error.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, size: 20, color: Theme.of(context).colorScheme.error),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'سيتم مسح $historyCount فحص',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -772,8 +1002,102 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> with SingleTicker
     );
 
     if (shouldClear == true) {
-      await ref.read(scanNotifierProvider.notifier).clearUserHistory();
-      _stopSearch();
+      try {
+        // إلغاء أي تايمر سابق
+        _undoAllTimer?.cancel();
+        
+        // حفظ جميع الفحوصات قبل الحذف للتراجع
+        _lastDeletedAllScans = List.from(scanHistory);
+        
+        // حذف جميع الفحوصات
+        await ref.read(scanNotifierProvider.notifier).clearUserHistory();
+        _stopSearch();
+        
+        if (!context.mounted) return;
+        
+        // مسح أي رسائل سابقة قبل إظهار الرسالة الجديدة
+        ScaffoldMessenger.of(context).clearSnackBars();
+        
+        // إظهار رسالة نجاح مسح الكل مع زر التراجع (تظهر لمدة 5 ثواني ثم تختفي)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.delete_sweep, color: Colors.white, size: 16),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'تم مسح السجل بالكامل',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      Text(
+                        'تم حذف $historyCount فحص',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.white.withValues(alpha: 0.9),
+                        ),
+                      ),
+                      Text(
+                        'سيتم إغلاق هذه الرسالة بعد 5 ثواني',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.white.withValues(alpha: 0.7),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 5), // 👈 5 ثواني بالضبط ثم تختفي تلقائياً
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            action: SnackBarAction(
+              label: 'تراجع',
+              textColor: Colors.white,
+              onPressed: _undoDeleteAll, // 👈 دالة التراجع عن حذف الكل
+            ),
+          ),
+        );
+        
+        // تايمر لمسح القائمة المحفوظة بعد انتهاء مدة التراجع (5 ثواني)
+        _undoAllTimer = Timer(const Duration(seconds: 5), () {
+          if (mounted) {
+            setState(() {
+              _lastDeletedAllScans = null;
+            });
+          }
+        });
+        
+      } catch (e) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.error_outline, color: Colors.white),
+                const SizedBox(width: 12),
+                Expanded(child: Text('حدث خطأ أثناء مسح السجل: $e')),
+              ],
+            ),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
     }
   }
 }

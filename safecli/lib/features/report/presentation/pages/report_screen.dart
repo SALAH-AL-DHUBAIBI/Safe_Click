@@ -1,4 +1,5 @@
-﻿import 'package:flutter/material.dart';
+﻿import 'dart:async';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:safeclik/features/report/presentation/providers/report_controller.dart';
 import 'package:safeclik/features/auth/presentation/providers/auth_controller.dart';
@@ -14,10 +15,17 @@ class ReportScreen extends ConsumerStatefulWidget {
 class _ReportScreenState extends ConsumerState<ReportScreen> with SingleTickerProviderStateMixin {
   final TextEditingController _linkController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
+  final FocusNode _linkFocusNode = FocusNode();
+  final FocusNode _descriptionFocusNode = FocusNode();
+  
   String? _selectedCategory;
   int _selectedSeverity = 3;
   late AnimationController _animationController;
   bool _isSubmitting = false;
+
+  // 🗑️ متغيرات للتراجع عن الحذف
+  ReportModel? _lastDeletedReport;
+  Timer? _undoTimer;
 
   final List<String> _categories = [
     'تصيد احتيالي',
@@ -61,12 +69,18 @@ class _ReportScreenState extends ConsumerState<ReportScreen> with SingleTickerPr
   void dispose() {
     _linkController.dispose();
     _descriptionController.dispose();
+    _linkFocusNode.dispose();
+    _descriptionFocusNode.dispose();
     _animationController.dispose();
+    _undoTimer?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final reportState = ref.watch(reportProvider);
+    final reports = reportState.value ?? [];
+
     return Scaffold(
       body: Directionality(
         textDirection: TextDirection.rtl,
@@ -85,13 +99,11 @@ class _ReportScreenState extends ConsumerState<ReportScreen> with SingleTickerPr
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
-                _buildHeader(context),
+                _buildHeader(context, reports.length),
                 const SizedBox(height: 20),
                 _buildForm(context),
                 const SizedBox(height: 20),
                 _buildGuidelines(context),
-                const SizedBox(height: 20),
-                _buildReportsHistory(context),
                 const SizedBox(height: 20),
                 _buildErrorWidget(context),
               ],
@@ -102,7 +114,8 @@ class _ReportScreenState extends ConsumerState<ReportScreen> with SingleTickerPr
     );
   }
 
-  Widget _buildHeader(BuildContext context) {
+  // ✅ الهيدر بدون زر السجل
+  Widget _buildHeader(BuildContext context, int reportsCount) {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -118,6 +131,7 @@ class _ReportScreenState extends ConsumerState<ReportScreen> with SingleTickerPr
       ),
       child: Row(
         children: [
+          // أيقونة التطبيق
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
@@ -131,6 +145,8 @@ class _ReportScreenState extends ConsumerState<ReportScreen> with SingleTickerPr
             ),
           ),
           const SizedBox(width: 15),
+          
+          // النصوص
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.end,
@@ -159,6 +175,7 @@ class _ReportScreenState extends ConsumerState<ReportScreen> with SingleTickerPr
     );
   }
 
+  // ✅ تعديل مكان زر السجل ليكون مقابل "تفاصيل البلاغ"
   Widget _buildForm(BuildContext context) {
     return Card(
       elevation: 4,
@@ -168,13 +185,65 @@ class _ReportScreenState extends ConsumerState<ReportScreen> with SingleTickerPr
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'تفاصيل البلاغ',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: Theme.of(context).colorScheme.primary,
-              ),
+            // عنوان تفاصيل البلاغ مع زر السجل مقابله
+            Row(
+              children: [
+                Text(
+                  'تفاصيل البلاغ',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                ),
+                const Spacer(),
+                // زر السجل هنا
+                if (ref.watch(reportProvider).value?.isNotEmpty ?? false)
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        IconButton(
+                          icon: Icon(
+                            Icons.history_edu_rounded,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                          onPressed: () => _showReportsBottomSheet(context),
+                          tooltip: 'عرض سجل البلاغات',
+                        ),
+                        // عداد البلاغات
+                        Positioned(
+                          top: 0,
+                          right: 0,
+                          child: Container(
+                            padding: const EdgeInsets.all(2),
+                            decoration: BoxDecoration(
+                              color: Colors.red,
+                              shape: BoxShape.circle,
+                            ),
+                            constraints: const BoxConstraints(
+                              minWidth: 16,
+                              minHeight: 16,
+                            ),
+                            child: Text(
+                              '${ref.watch(reportProvider).value?.length ?? 0}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 8,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
             ),
             const SizedBox(height: 20),
             _buildLinkField(context),
@@ -192,6 +261,789 @@ class _ReportScreenState extends ConsumerState<ReportScreen> with SingleTickerPr
     );
   }
 
+  // ✅ دالة عرض سجل البلاغات في BottomSheet
+  void _showReportsBottomSheet(BuildContext context) {
+    final reportState = ref.read(reportProvider);
+    final reports = reportState.value ?? [];
+    final reportNotifier = ref.read(reportProvider.notifier);
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
+      ),
+      builder: (context) => Container(
+        height: MediaQuery.of(context).size.height * 0.75,
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            // مؤشر السحب
+            Container(
+              width: 50,
+              height: 5,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            const SizedBox(height: 20),
+            
+            // العنوان مع زر حذف الكل
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    Icons.history_edu_rounded,
+                    color: Theme.of(context).colorScheme.primary,
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const Text(
+                  'سجل البلاغات',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const Spacer(),
+                
+                // زر حذف الكل
+                if (reports.isNotEmpty)
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.error.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: IconButton(
+                      icon: Icon(
+                        Icons.delete_sweep,
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                      onPressed: () {
+                        Navigator.pop(context); // إغلاق الـ BottomSheet
+                        _confirmClearAllReports(context, reportNotifier);
+                      },
+                      tooltip: 'حذف الكل',
+                    ),
+                  ),
+              ],
+            ),
+            const Divider(height: 30),
+            
+            // قائمة البلاغات
+            Expanded(
+              child: reportState.when(
+                loading: () => const Center(
+                  child: CircularProgressIndicator(),
+                ),
+                error: (error, stack) => Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.error_outline,
+                        size: 48,
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'حدث خطأ في تحميل البلاغات',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                data: (reports) {
+                  if (reports.isEmpty) {
+                    return Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.inbox_outlined,
+                            size: 64,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'لا توجد بلاغات بعد',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              fontSize: 16,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'قم بإرسال بلاغ جديد ليظهر هنا',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+
+                  return ListView.separated(
+                    itemCount: reports.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) => 
+                      _buildBottomSheetReportCard(context, reports[index], reportNotifier),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ✅ بطاقة البلاغ المخصصة للـ BottomSheet مع ميزة التراجع
+  Widget _buildBottomSheetReportCard(BuildContext context, ReportModel report, ReportNotifier notifier) {
+    final displayUrl = report.link.length > 35
+        ? '${report.link.substring(0, 32)}...'
+        : report.link;
+
+    final date = report.reportDate;
+    final dateStr =
+        '${date.day}/${date.month}/${date.year}';
+
+    return Card(
+      elevation: 1,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: InkWell(
+        onTap: () => _showReportDetails(context, report),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // الصف العلوي: رقم التتبع والحالة وزر الحذف
+              Row(
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.tag,
+                          size: 14,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            report.trackingNumber ?? 'بدون رقم',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  _buildStatusBadge(context, report.status),
+                  const SizedBox(width: 8),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.error.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: IconButton(
+                      icon: Icon(
+                        Icons.close,
+                        color: Theme.of(context).colorScheme.error,
+                        size: 16,
+                      ),
+                      onPressed: () {
+                        Navigator.pop(context); // إغلاق الـ BottomSheet
+                        _confirmDeleteReport(context, report, notifier);
+                      },
+                      constraints: const BoxConstraints(
+                        minWidth: 28,
+                        minHeight: 28,
+                      ),
+                      padding: EdgeInsets.zero,
+                    ),
+                  ),
+                ],
+              ),
+              
+              const SizedBox(height: 8),
+              
+              // الرابط
+              Row(
+                children: [
+                  Icon(
+                    Icons.link,
+                    size: 14,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      displayUrl,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              
+              const SizedBox(height: 8),
+              
+              // الصف السفلي: التصنيف ودرجة الخطورة والتاريخ
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.secondaryContainer.withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      report.category,
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Theme.of(context).colorScheme.onSecondaryContainer,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: _getSeverityColor(context, report.severity).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(
+                        color: _getSeverityColor(context, report.severity).withValues(alpha: 0.2),
+                      ),
+                    ),
+                    child: Text(
+                      _getSeverityLabel(report.severity),
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: _getSeverityColor(context, report.severity),
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.calendar_today_outlined,
+                        size: 10,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 2),
+                      Text(
+                        dateStr,
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ✅ عرض تفاصيل البلاغ
+  void _showReportDetails(BuildContext context, ReportModel report) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 50,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            
+            Row(
+              children: [
+                Icon(
+                  Icons.description,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'تفاصيل البلاغ',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            const Divider(height: 20),
+            
+            _buildDetailItem(
+              context,
+              icon: Icons.tag,
+              label: 'رقم التتبع',
+              value: report.trackingNumber ?? 'غير متوفر',
+              isSelectable: true,
+            ),
+            
+            _buildDetailItem(
+              context,
+              icon: Icons.link,
+              label: 'الرابط',
+              value: report.link,
+              isSelectable: true,
+            ),
+            
+            _buildDetailItem(
+              context,
+              icon: Icons.category,
+              label: 'نوع التهديد',
+              value: report.category,
+            ),
+            
+            _buildDetailItem(
+              context,
+              icon: Icons.speed,
+              label: 'درجة الخطورة',
+              value: _getSeverityLabel(report.severity),
+              valueColor: _getSeverityColor(context, report.severity),
+            ),
+            
+            _buildDetailItem(
+              context,
+              icon: Icons.info,
+              label: 'الحالة',
+              value: _statusConfig(report.status).$2,
+              valueColor: _statusConfig(report.status).$1,
+            ),
+            
+            _buildDetailItem(
+              context,
+              icon: Icons.calendar_today,
+              label: 'تاريخ الإبلاغ',
+              value: '${report.reportDate.year}/${report.reportDate.month.toString().padLeft(2, '0')}/${report.reportDate.day.toString().padLeft(2, '0')}',
+            ),
+            
+            if (report.description?.isNotEmpty ?? false) ...[
+              const SizedBox(height: 16),
+              _buildDetailItem(
+                context,
+                icon: Icons.description,
+                label: 'وصف إضافي',
+                value: report.description!,
+              ),
+            ],
+            
+            const SizedBox(height: 20),
+            
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('إغلاق'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // عنصر تفصيلي في عرض التفاصيل
+  Widget _buildDetailItem(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required String value,
+    Color? valueColor,
+    bool isSelectable = false,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, color: Theme.of(context).colorScheme.primary, size: 16),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                if (isSelectable)
+                  SelectableText(
+                    value,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: valueColor ?? Theme.of(context).colorScheme.onSurface,
+                    ),
+                  )
+                else
+                  Text(
+                    value,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: valueColor ?? Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ تأكيد حذف بلاغ فردي مع ميزة التراجع
+  Future<void> _confirmDeleteReport(BuildContext context, ReportModel report, ReportNotifier notifier) async {
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.delete_outline, color: Colors.orange),
+            SizedBox(width: 10),
+            Text('حذف البلاغ'),
+          ],
+        ),
+        content: Text('هل أنت متأكد من حذف البلاغ رقم: ${report.trackingNumber ?? report.link.substring(0, 20)}...؟'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
+            child: const Text('حذف'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldDelete == true) {
+      try {
+        // حفظ البلاغ المحذوف للتراجع
+        _lastDeletedReport = report;
+        
+        // إلغاء أي تايمر سابق
+        _undoTimer?.cancel();
+        
+        // حذف البلاغ محلياً فقط
+        final currentList = notifier.deleteReportLocally(report.id);
+        
+        if (!context.mounted) return;
+        
+        final linkPreview = report.link.length > 30 
+            ? '${report.link.substring(0, 30)}...' 
+            : report.link;
+        
+        // إظهار رسالة نجاح الحذف مع زر التراجع (5 ثواني)
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.check, color: Colors.white, size: 16),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'تم حذف البلاغ',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      Text(
+                        linkPreview,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.white.withValues(alpha: 0.9),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        'سيتم إغلاق هذه الرسالة بعد 5 ثواني',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.white.withValues(alpha: 0.7),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 5),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            action: SnackBarAction(
+              label: 'تراجع',
+              textColor: Colors.white,
+              onPressed: () {
+                // إعادة البلاغ المحذوف
+                if (_lastDeletedReport != null) {
+                  notifier.addReportLocally(_lastDeletedReport!);
+                  _lastDeletedReport = null;
+                  _undoTimer?.cancel();
+                  
+                  // إظهار رسالة تأكيد التراجع
+                  ScaffoldMessenger.of(context).clearSnackBars();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('تم التراجع عن الحذف'),
+                      backgroundColor: Colors.blue,
+                      behavior: SnackBarBehavior.floating,
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                }
+              },
+            ),
+          ),
+        );
+        
+        // تايمر لمسح البلاغ المحفوظ بعد انتهاء مدة التراجع
+        _undoTimer = Timer(const Duration(seconds: 5), () {
+          if (mounted) {
+            setState(() {
+              _lastDeletedReport = null;
+            });
+          }
+        });
+        
+      } catch (e) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.error_outline, color: Colors.white),
+                const SizedBox(width: 8),
+                Expanded(child: Text('فشل حذف البلاغ: $e')),
+              ],
+            ),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  // ✅ تأكيد حذف جميع البلاغات مع ميزة التراجع
+  Future<void> _confirmClearAllReports(BuildContext context, ReportNotifier notifier) async {
+    final currentReports = ref.read(reportProvider).value ?? [];
+    
+    final shouldClear = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.red),
+            SizedBox(width: 10),
+            Text('حذف جميع البلاغات'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('هل أنت متأكد من حذف جميع البلاغات السابقة؟'),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.error.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Theme.of(context).colorScheme.error.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, size: 20, color: Theme.of(context).colorScheme.error),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'سيتم حذف ${currentReports.length} بلاغ',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
+            child: const Text('حذف الكل'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldClear == true) {
+      try {
+        // حفظ البلاغات المحذوفة للتراجع
+        final deletedReports = List<ReportModel>.from(currentReports);
+        
+        // حذف جميع البلاغات محلياً
+        notifier.clearAllReportsLocally();
+        
+        if (!context.mounted) return;
+        
+        // إظهار رسالة نجاح الحذف مع زر التراجع (5 ثواني)
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.delete_sweep, color: Colors.white, size: 16),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'تم حذف جميع البلاغات',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      Text(
+                        'سيتم إغلاق هذه الرسالة بعد 5 ثواني',
+                        style: TextStyle(fontSize: 10),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 5),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            action: SnackBarAction(
+              label: 'تراجع',
+              textColor: Colors.white,
+              onPressed: () {
+                // إعادة جميع البلاغات المحذوفة
+                for (var report in deletedReports) {
+                  notifier.addReportLocally(report);
+                }
+                
+                // إظهار رسالة تأكيد التراجع
+                ScaffoldMessenger.of(context).clearSnackBars();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('تم التراجع عن حذف ${deletedReports.length} بلاغ'),
+                    backgroundColor: Colors.blue,
+                    behavior: SnackBarBehavior.floating,
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+        
+      } catch (e) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('فشل حذف البلاغات: $e'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
   Widget _buildLinkField(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -206,18 +1058,45 @@ class _ReportScreenState extends ConsumerState<ReportScreen> with SingleTickerPr
         const SizedBox(height: 8),
         TextField(
           controller: _linkController,
+          focusNode: _linkFocusNode,
           style: TextStyle(
             color: Theme.of(context).colorScheme.onSurface,
           ),
           decoration: InputDecoration(
             hintText: 'https://example.com',
-            prefixIcon: Icon(Icons.link, color: Theme.of(context).colorScheme.primary),
+            hintStyle: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: Theme.of(context).colorScheme.primary, width: 2),
+            ),
+            prefixIcon: Icon(
+              Icons.link,
+              color: _linkFocusNode.hasFocus
+                  ? Theme.of(context).colorScheme.primary
+                  : Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
             suffixIcon: IconButton(
-              icon: Icon(Icons.clear, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              icon: Icon(
+                Icons.clear,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
               onPressed: () => _linkController.clear(),
             ),
           ),
           textDirection: TextDirection.ltr,
+          onTap: () {
+            setState(() {});
+          },
         ),
       ],
     );
@@ -236,37 +1115,44 @@ class _ReportScreenState extends ConsumerState<ReportScreen> with SingleTickerPr
         ),
         const SizedBox(height: 8),
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: Theme.of(context).colorScheme.outlineVariant,
+            ),
           ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<String>(
-              value: _selectedCategory,
-              hint: Text(
-                'اختر نوع التهديد',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: _selectedCategory,
+                hint: Text(
+                  'اختر نوع التهديد',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
+                isExpanded: true,
+                icon: Icon(
+                  Icons.arrow_drop_down,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                dropdownColor: Theme.of(context).colorScheme.surface,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+                items: _categories.map((category) {
+                  return DropdownMenuItem(
+                    value: category,
+                    child: Text(category),
+                  );
+                }).toList(),
+                onChanged: (value) {
+                  setState(() {
+                    _selectedCategory = value;
+                  });
+                },
               ),
-              isExpanded: true,
-              icon: Icon(Icons.arrow_drop_down, color: Theme.of(context).colorScheme.primary),
-              dropdownColor: Theme.of(context).colorScheme.surface,
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurface,
-              ),
-              items: _categories.map((category) {
-                return DropdownMenuItem(
-                  value: category,
-                  child: Text(category),
-                );
-              }).toList(),
-              onChanged: (value) {
-                setState(() {
-                  _selectedCategory = value;
-                });
-              },
             ),
           ),
         ),
@@ -285,6 +1171,9 @@ class _ReportScreenState extends ConsumerState<ReportScreen> with SingleTickerPr
         const SizedBox(height: 8),
         Row(
           children: _severityLevels.map((level) {
+            final isSelected = _selectedSeverity == level['value'];
+            final color = _getSeverityColor(context, level['value']);
+            
             return Expanded(
               child: GestureDetector(
                 onTap: () {
@@ -296,14 +1185,11 @@ class _ReportScreenState extends ConsumerState<ReportScreen> with SingleTickerPr
                   margin: const EdgeInsets.symmetric(horizontal: 2),
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   decoration: BoxDecoration(
-                    color: _selectedSeverity == level['value']
-                        ? _getSeverityColor(context, level['value'])
-                        : _getSeverityColor(context, level['value']).withValues(alpha: 0.1),
+                    color: isSelected ? color : color.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: _selectedSeverity == level['value']
-                          ? _getSeverityColor(context, level['value'])
-                          : _getSeverityColor(context, level['value']).withValues(alpha: 0.3),
+                      color: isSelected ? color : color.withValues(alpha: 0.3),
+                      width: isSelected ? 2 : 1,
                     ),
                   ),
                   child: Column(
@@ -311,9 +1197,9 @@ class _ReportScreenState extends ConsumerState<ReportScreen> with SingleTickerPr
                       Text(
                         level['value'].toString(),
                         style: TextStyle(
-                          color: _selectedSeverity == level['value']
+                          color: isSelected
                               ? Theme.of(context).colorScheme.surface
-                              : _getSeverityColor(context, level['value']),
+                              : color,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -321,9 +1207,9 @@ class _ReportScreenState extends ConsumerState<ReportScreen> with SingleTickerPr
                         level['label'],
                         style: TextStyle(
                           fontSize: 10,
-                          color: _selectedSeverity == level['value']
+                          color: isSelected
                               ? Theme.of(context).colorScheme.surface
-                              : _getSeverityColor(context, level['value']),
+                              : color,
                         ),
                       ),
                     ],
@@ -351,15 +1237,37 @@ class _ReportScreenState extends ConsumerState<ReportScreen> with SingleTickerPr
         const SizedBox(height: 8),
         TextField(
           controller: _descriptionController,
+          focusNode: _descriptionFocusNode,
           maxLines: 4,
           maxLength: 500,
           style: TextStyle(
             color: Theme.of(context).colorScheme.onSurface,
           ),
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             hintText: 'أضف أي تفاصيل إضافية عن الرابط...',
-            alignLabelWithHint: true,
+            hintStyle: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: Theme.of(context).colorScheme.primary, width: 2),
+            ),
+            counterStyle: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+              fontSize: 12,
+            ),
           ),
+          onTap: () {
+            setState(() {});
+          },
         ),
       ],
     );
@@ -387,6 +1295,9 @@ class _ReportScreenState extends ConsumerState<ReportScreen> with SingleTickerPr
               ),
         style: ElevatedButton.styleFrom(
           padding: const EdgeInsets.symmetric(vertical: 15),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
       ),
     );
@@ -456,345 +1367,6 @@ class _ReportScreenState extends ConsumerState<ReportScreen> with SingleTickerPr
     );
   }
 
-  // ─── Reports History Section ────────────────────────────────────────────────
-
-  Widget _buildReportsHistory(BuildContext context) {
-    final reportsAsync = ref.watch(reportProvider);
-
-    return reportsAsync.when(
-      loading: () => Container(
-        padding: const EdgeInsets.symmetric(vertical: 24),
-        alignment: Alignment.center,
-        child: Column(
-          children: [
-            CircularProgressIndicator(
-              color: Theme.of(context).colorScheme.primary,
-              strokeWidth: 2,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'جارٍ تحميل بلاغاتك...',
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                fontSize: 13,
-              ),
-            ),
-          ],
-        ),
-      ),
-      error: (_, __) => const SizedBox.shrink(),
-      data: (reports) {
-        // ── SECTION HEADER ──
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(
-                    Icons.history_edu_rounded,
-                    color: Theme.of(context).colorScheme.primary,
-                    size: 22,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Text(
-                  'سجل البلاغات',
-                  style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.bold,
-                    color: Theme.of(context).colorScheme.onSurface,
-                  ),
-                ),
-                const Spacer(),
-                if (reports.isNotEmpty)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primary,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      '${reports.length}',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onPrimary,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 12),
-
-            // ── EMPTY STATE ──
-            if (reports.isEmpty)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(28),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: Theme.of(context).colorScheme.outlineVariant,
-                  ),
-                ),
-                child: Column(
-                  children: [
-                    Icon(
-                      Icons.inbox_outlined,
-                      size: 48,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      'لا توجد بلاغات مُرسَلة بعد',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ],
-                ),
-              )
-            else
-              // ── REPORTS LIST ──
-              ListView.separated(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: reports.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 10),
-                itemBuilder: (context, index) =>
-                    _buildReportCard(context, reports[index]),
-              ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildReportCard(BuildContext context, ReportModel report) {
-    final displayUrl = report.link.length > 45
-        ? '${report.link.substring(0, 42)}...'
-        : report.link;
-
-    final date = report.reportDate;
-    final dateStr =
-        '${date.year}/${date.month.toString().padLeft(2, '0')}/${date.day.toString().padLeft(2, '0')}';
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.6),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Theme.of(context).shadowColor.withValues(alpha: 0.06),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── TOP ROW: tracking number + status badge ──
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (report.trackingNumber != null) ...[
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.tag,
-                              size: 14,
-                              color: Theme.of(context).colorScheme.primary,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              report.trackingNumber!,
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                                color: Theme.of(context).colorScheme.primary,
-                                letterSpacing: 0.5,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                      ],
-                      // URL
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.link,
-                            size: 14,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              displayUrl,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // Status badge
-                _buildStatusBadge(context, report.status),
-              ],
-            ),
-
-            const SizedBox(height: 10),
-            const Divider(height: 1),
-            const SizedBox(height: 10),
-
-            // ── BOTTOM ROW: category + severity + date ──
-            Row(
-              children: [
-                // Category chip
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.secondaryContainer.withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    report.category,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                      color: Theme.of(context).colorScheme.onSecondaryContainer,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                // Severity chip
-                _buildSeverityChip(context, report.severity),
-                const Spacer(),
-                // Date
-                Row(
-                  children: [
-                    Icon(
-                      Icons.calendar_today_outlined,
-                      size: 12,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      dateStr,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// Colored badge for the 5 backend report statuses.
-  Widget _buildStatusBadge(BuildContext context, String? status) {
-    final cfg = _statusConfig(status);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: cfg.$1.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: cfg.$1.withValues(alpha: 0.4)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 7,
-            height: 7,
-            decoration: BoxDecoration(
-              color: cfg.$1,
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 5),
-          Text(
-            cfg.$2,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
-              color: cfg.$1,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// Returns (color, arabicLabel) for a given status string.
-  (Color, String) _statusConfig(String? status) {
-    switch (status) {
-      case 'pending':
-        return (const Color(0xFFE67E22), 'قيد المراجعة');   // orange
-      case 'reviewing':
-        return (const Color(0xFF2980B9), 'قيد التحقيق');    // blue
-      case 'confirmed':
-        return (const Color(0xFFC0392B), 'تم التأكيد');     // red
-      case 'rejected':
-        return (const Color(0xFF7F8C8D), 'مرفوض');          // grey
-      case 'resolved':
-        return (const Color(0xFF27AE60), 'تم الحل');        // green
-      default:
-        return (const Color(0xFFE67E22), 'قيد المراجعة');   // fallback
-    }
-  }
-
-  Widget _buildSeverityChip(BuildContext context, int severity) {
-    final labels = {1: 'منخفض', 2: 'متوسط', 3: 'عالي', 4: 'خطير', 5: 'حرج'};
-    final label = labels[severity] ?? '؟';
-    final color = _getSeverityColor(context, severity);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withValues(alpha: 0.35)),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w500,
-          color: color,
-        ),
-      ),
-    );
-  }
-
   Widget _buildErrorWidget(BuildContext context) {
     final reportNotifier = ref.read(reportProvider.notifier);
     final lastError = reportNotifier.lastError;
@@ -838,6 +1410,54 @@ class _ReportScreenState extends ConsumerState<ReportScreen> with SingleTickerPr
         ],
       ),
     );
+  }
+
+  String _getSeverityLabel(int severity) {
+    switch (severity) {
+      case 1: return 'منخفض';
+      case 2: return 'متوسط';
+      case 3: return 'عالي';
+      case 4: return 'خطير';
+      case 5: return 'حرج';
+      default: return 'غير معروف';
+    }
+  }
+
+  Widget _buildStatusBadge(BuildContext context, String? status) {
+    final cfg = _statusConfig(status);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: cfg.$1.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: cfg.$1.withValues(alpha: 0.3)),
+      ),
+      child: Text(
+        cfg.$2,
+        style: TextStyle(
+          fontSize: 9,
+          fontWeight: FontWeight.bold,
+          color: cfg.$1,
+        ),
+      ),
+    );
+  }
+
+  (Color, String) _statusConfig(String? status) {
+    switch (status) {
+      case 'pending':
+        return (const Color(0xFFE67E22), 'قيد المراجعة');
+      case 'reviewing':
+        return (const Color(0xFF2980B9), 'قيد التحقيق');
+      case 'confirmed':
+        return (const Color(0xFFC0392B), 'تم التأكيد');
+      case 'rejected':
+        return (const Color(0xFF7F8C8D), 'مرفوض');
+      case 'resolved':
+        return (const Color(0xFF27AE60), 'تم الحل');
+      default:
+        return (const Color(0xFFE67E22), 'قيد المراجعة');
+    }
   }
 
   Future<void> _submitReport() async {
@@ -983,38 +1603,6 @@ class _ReportScreenState extends ConsumerState<ReportScreen> with SingleTickerPr
               'إغلاق',
               style: TextStyle(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void showInfoDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        title: Text(
-          'معلومات الإبلاغ',
-          style: TextStyle(
-            color: Theme.of(context).colorScheme.onSurface,
-          ),
-        ),
-        content: Text(
-          'الإبلاغ عن الروابط الضارة يساعد في حماية المجتمع الرقمي. يتم مراجعة جميع البلاغات من قبل فريق متخصص. يمكنك متابعة حالة بلاغك باستخدام رقم التتبع.',
-          style: TextStyle(
-            color: Theme.of(context).colorScheme.onSurface,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'حسناً',
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.primary,
               ),
             ),
           ),

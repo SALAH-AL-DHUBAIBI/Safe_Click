@@ -276,7 +276,13 @@ Future<void> softDeleteScanResult(String id) async {
   }
   
   void clearError() => state = state.copyWith(lastError: null);
-
+void addScanResult(ScanResult result) {
+  if (!state.scanHistory.any((scan) => scan.id == result.id)) {
+    state = state.copyWith(
+      scanHistory: [result, ...state.scanHistory],
+    );
+  }
+}
   void reset() {
     state = const ScanState();
   }

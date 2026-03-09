@@ -79,7 +79,7 @@ class _SplashScreenState extends State<SplashScreen>
               child: Column(
                 children: [
                   Text(
-                    'Safe Clik',
+                    'Safe Click',
                     style: TextStyle(
                       fontSize: 36,
                       fontWeight: FontWeight.bold,

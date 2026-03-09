@@ -33,7 +33,7 @@ class ReportNotifier extends AsyncNotifier<List<ReportModel>> {
     }
     return [];
   }
-
+  
   Future<bool> submitReport({
     required String link,
     required String category,
@@ -46,8 +46,6 @@ class ReportNotifier extends AsyncNotifier<List<ReportModel>> {
 
     _isReporting = true;
     _lastError = null;
-    
-    // We notify UI that reporting started by setting loading if needed or just updating UI
     
     try {
       debugPrint('🔵 إرسال بلاغ: $link - $category');
@@ -77,6 +75,164 @@ class ReportNotifier extends AsyncNotifier<List<ReportModel>> {
       return false;
     } finally {
       _isReporting = false;
+    }
+  }
+
+  // ✅ دالة حذف بلاغ فردي
+  Future<bool> deleteReport(String reportId) async {
+    try {
+      // تحديث حالة التحميل
+      state = const AsyncValue.loading();
+      
+      debugPrint('🔵 حذف بلاغ: $reportId');
+      
+      // استدعاء API لحذف البلاغ
+      final response = await _reportApi.deleteReport(reportId);
+      
+      debugPrint('📥 الرد: $response');
+      
+      if (response['success'] == true) {
+        // جلب البلاغات المحدثة بعد الحذف
+        final updatedReports = await _fetchMyReports();
+        state = AsyncValue.data(updatedReports);
+        
+        return true;
+      } else {
+        _lastError = response['message'] ?? 'فشل حذف البلاغ';
+        
+        // إعادة تحميل البلاغات في حالة الفشل
+        final currentReports = await _fetchMyReports();
+        state = AsyncValue.data(currentReports);
+        
+        return false;
+      }
+    } catch (e) {
+      debugPrint('❌ خطأ في حذف البلاغ: $e');
+      _lastError = 'حدث خطأ في الاتصال بالخادم';
+      
+      // إعادة تحميل البلاغات في حالة الخطأ
+      try {
+        final currentReports = await _fetchMyReports();
+        state = AsyncValue.data(currentReports);
+      } catch (fetchError) {
+        state = AsyncValue.data([]);
+      }
+      
+      return false;
+    }
+  }
+
+  // ✅ دالة حذف جميع البلاغات
+  Future<bool> clearAllReports() async {
+    try {
+      // تحديث حالة التحميل
+      state = const AsyncValue.loading();
+      
+      debugPrint('🔵 حذف جميع البلاغات');
+      
+      // استدعاء API لحذف جميع البلاغات
+      final response = await _reportApi.deleteAllReports();
+      
+      debugPrint('📥 الرد: $response');
+      
+      if (response['success'] == true) {
+        // تفريغ القائمة محلياً
+        state = const AsyncValue.data([]);
+        return true;
+      } else {
+        _lastError = response['message'] ?? 'فشل حذف جميع البلاغات';
+        
+        // إعادة تحميل البلاغات في حالة الفشل
+        final currentReports = await _fetchMyReports();
+        state = AsyncValue.data(currentReports);
+        
+        return false;
+      }
+    } catch (e) {
+      debugPrint('❌ خطأ في حذف جميع البلاغات: $e');
+      _lastError = 'حدث خطأ في الاتصال بالخادم';
+      
+      // إعادة تحميل البلاغات في حالة الخطأ
+      try {
+        final currentReports = await _fetchMyReports();
+        state = AsyncValue.data(currentReports);
+      } catch (fetchError) {
+        state = AsyncValue.data([]);
+      }
+      
+      return false;
+    }
+  }
+
+  // ✅ دالة تحديث حالة البلاغ (اختيارية)
+  Future<bool> updateReportStatus(String reportId, String newStatus) async {
+    try {
+      state = const AsyncValue.loading();
+      
+      debugPrint('🔵 تحديث حالة البلاغ: $reportId إلى $newStatus');
+      
+      final response = await _reportApi.updateReportStatus(reportId, newStatus);
+      
+      debugPrint('📥 الرد: $response');
+      
+      if (response['success'] == true) {
+        final updatedReports = await _fetchMyReports();
+        state = AsyncValue.data(updatedReports);
+        return true;
+      } else {
+        _lastError = response['message'] ?? 'فشل تحديث حالة البلاغ';
+        
+        final currentReports = await _fetchMyReports();
+        state = AsyncValue.data(currentReports);
+        
+        return false;
+      }
+    } catch (e) {
+      debugPrint('❌ خطأ في تحديث حالة البلاغ: $e');
+      _lastError = 'حدث خطأ في الاتصال بالخادم';
+      
+      try {
+        final currentReports = await _fetchMyReports();
+        state = AsyncValue.data(currentReports);
+      } catch (fetchError) {
+        state = AsyncValue.data([]);
+      }
+      
+      return false;
+    }
+  }
+
+  // ✅ حذف بلاغ محلياً فقط (بدون API)
+void deleteReportLocally(String reportId) {
+  final currentList = state.value ?? [];
+  final updatedList = currentList.where((r) => r.id != reportId).toList();
+  state = AsyncValue.data(updatedList);
+}
+
+// ✅ إضافة بلاغ محلياً (للتراجع)
+void addReportLocally(ReportModel report) {
+  final currentList = state.value ?? [];
+  // التأكد من عدم وجود تكرار
+  if (!currentList.any((r) => r.id == report.id)) {
+    final updatedList = [report, ...currentList];
+    state = AsyncValue.data(updatedList);
+  }
+}
+
+// ✅ حذف جميع البلاغات محلياً (بدون API)
+void clearAllReportsLocally() {
+  state = const AsyncValue.data([]);
+}
+
+  // ✅ دالة تحديث البلاغات (تحديث يدوي)
+  Future<void> refreshReports() async {
+    try {
+      state = const AsyncValue.loading();
+      final reports = await _fetchMyReports();
+      state = AsyncValue.data(reports);
+    } catch (e) {
+      debugPrint('❌ خطأ في تحديث البلاغات: $e');
+      state = AsyncValue.error(e, StackTrace.current);
     }
   }
 
