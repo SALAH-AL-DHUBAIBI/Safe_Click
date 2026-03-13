@@ -1,4 +1,6 @@
-﻿// lib/models/user_model.dart
+import 'package:safeclik/core/network/api_client.dart';
+
+// lib/models/user_model.dart
 class UserModel {
   final String id;
   final String name;
@@ -87,6 +89,9 @@ class UserModel {
   String? get fullProfileImageUrl {
     if (profileImage == null) return null;
     if (profileImage!.startsWith('http')) return profileImage;
-    return 'http://192.168.8.110:8000$profileImage';
+    
+    // استخراج الرابط الأساسي من ApiClient وتجنب تكرار /api
+    final baseUrl = ApiClient.baseUrl.replaceAll('/api', '');
+    return '$baseUrl$profileImage';
   }
 }

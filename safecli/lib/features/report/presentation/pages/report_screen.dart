@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:safeclik/features/report/presentation/providers/report_controller.dart';
@@ -1647,7 +1647,7 @@ class _ReportScreenState extends ConsumerState<ReportScreen> with SingleTickerPr
     }
 
     if (!_isValidUrl(_linkController.text)) {
-      _showSnackBar('الرابط غير صحيح', true);
+      _showSnackBar('يرجى إدخال رابط صحيح (مثال: https://example.com)', true);
       return;
     }
 
@@ -1678,9 +1678,21 @@ class _ReportScreenState extends ConsumerState<ReportScreen> with SingleTickerPr
   }
 
   bool _isValidUrl(String url) {
-    final urlPattern = r'^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$';
-    final regex = RegExp(urlPattern, caseSensitive: false);
-    return regex.hasMatch(url);
+    try {
+      String normalizedUrl = url.trim();
+      // إضافة البروتوكول إذا لم يكن موجوداً
+      if (!normalizedUrl.startsWith('http://') &&
+          !normalizedUrl.startsWith('https://')) {
+        normalizedUrl = 'https://$normalizedUrl';
+      }
+      final uri = Uri.tryParse(normalizedUrl);
+      return uri != null &&
+          uri.hasScheme &&
+          uri.host.isNotEmpty &&
+          uri.host.contains('.');
+    } catch (e) {
+      return false;
+    }
   }
 
   void _clearForm() {

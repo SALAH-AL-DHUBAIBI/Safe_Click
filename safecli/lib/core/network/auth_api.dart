@@ -169,26 +169,20 @@ class AuthApi {
     }
   }
 
-  /// تحديث الملف الشخصي
-  Future<Map<String, dynamic>> updateProfile({String? name, String? email}) async {
+  /// تحديث الملف الشخصي (الاسم و/أو الصورة)
+  Future<Map<String, dynamic>> updateProfile({String? name, String? imagePath}) async {
     try {
-      final body = <String, dynamic>{};
-      if (name != null) body['name'] = name;
-      if (email != null) body['email'] = email;
+      final Map<String, dynamic> data = {};
+      if (name != null) data['name'] = name;
       
-      final response = await _client.dio.patch('/auth/profile/', data: body);
-      return response.data;
-    } catch (e) {
-      return _client.handleDioError(e);
-    }
-  }
-
-  /// تحديث صورة الملف الشخصي
-  Future<Map<String, dynamic>> updateProfileImage(String imagePath) async {
-    try {
-      final formData = FormData.fromMap({
-        'profile_image': await MultipartFile.fromFile(imagePath),
-      });
+      if (imagePath != null) {
+        data['profile_image'] = await MultipartFile.fromFile(
+          imagePath,
+          filename: imagePath.split('/').last,
+        );
+      }
+      
+      final formData = FormData.fromMap(data);
       final response = await _client.dio.patch('/auth/profile/', data: formData);
       return response.data;
     } catch (e) {

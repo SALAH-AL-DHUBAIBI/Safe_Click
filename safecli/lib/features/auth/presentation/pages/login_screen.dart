@@ -413,7 +413,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     return TextFormField(
       controller: _usernameController,
       keyboardType: TextInputType.text,
-      textDirection: TextDirection.rtl,
       decoration: InputDecoration(
         labelText: 'الاسم الكامل',
         hintText: 'أدخل اسم المستخدم',

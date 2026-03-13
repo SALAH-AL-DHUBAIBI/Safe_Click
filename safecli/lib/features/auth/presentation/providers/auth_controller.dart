@@ -351,12 +351,20 @@ Future<void> _fetchUserProfileInBackground() async {
     }
   }
 
-  Future<bool> updateProfile({String? name, String? email}) async {
+  Future<bool> updateProfile({String? name, String? imagePath}) async {
     state = state.copyWith(isLoading: true, clearError: true);
     try {
-      final response = await _authApi.updateProfile(name: name, email: email);
+      final response = await _authApi.updateProfile(name: name, imagePath: imagePath);
+      
+      // الخادم يرجع بيانات المستخدم مباشرة أو تحت مفتاح 'user'
+      UserModel? user;
       if (response['user'] != null) {
-        final user = UserModel.fromJson(response['user']);
+        user = UserModel.fromJson(response['user']);
+      } else if (response.containsKey('id') || response.containsKey('email')) {
+        user = UserModel.fromJson(response);
+      }
+      
+      if (user != null) {
         state = state.copyWith(
           isLoading: false,
           user: user,
@@ -364,6 +372,7 @@ Future<void> _fetchUserProfileInBackground() async {
         _saveUserToCache(user);
         return true;
       }
+      
       state = state.copyWith(
         isLoading: false,
         error: response['message'] ?? 'فشل تحديث البيانات',
@@ -371,32 +380,14 @@ Future<void> _fetchUserProfileInBackground() async {
       return false;
     } catch (e) {
       debugPrint('UpdateProfile exception: $e');
-      state = state.copyWith(isLoading: false, error: 'حدث خطأ في الاتصال');
+      state = state.copyWith(isLoading: false, error: 'حدث خطأ في الاتصال بالخادم');
       return false;
     }
   }
 
-  Future<bool> updateProfileImage(String imagePath) async {
-    state = state.copyWith(isLoading: true, clearError: true);
-    try {
-      final response = await _authApi.updateProfileImage(imagePath);
-      if (response['user'] != null) {
-        final user = UserModel.fromJson(response['user']);
-        state = state.copyWith(
-          isLoading: false,
-          user: user,
-        );
-        _saveUserToCache(user);
-        return true;
-      }
-      state = state.copyWith(isLoading: false, error: 'فشل تحديث الصورة');
-      return false;
-    } catch (e) {
-      debugPrint('UpdateProfileImage exception: $e');
-      state = state.copyWith(isLoading: false, error: 'حدث خطأ في الاتصال');
-      return false;
-    }
-  }
+  // تم دمج تحديث الصورة مع تحديث الملف الشخصي
+  @Deprecated('استخدم updateProfile بدلاً من ذلك')
+  Future<bool> updateProfileImage(String imagePath) => updateProfile(imagePath: imagePath);
 
   Future<bool> changePassword({
     required String oldPassword,
