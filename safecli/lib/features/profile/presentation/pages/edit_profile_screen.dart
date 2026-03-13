@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:io';
@@ -32,8 +32,123 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   }
 
   Future<void> _pickImage() async {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        final theme = Theme.of(context);
+        return Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: theme.scaffoldBackgroundColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'اختيار صورة الملف الشخصي',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildImageSourceOption(
+                      context,
+                      icon: Icons.photo_library_rounded,
+                      label: 'المعرض',
+                      color: theme.colorScheme.primary,
+                      onTap: () {
+                        Navigator.pop(context);
+                        _pickImageFromSource(ImageSource.gallery);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: _buildImageSourceOption(
+                      context,
+                      icon: Icons.camera_alt_rounded,
+                      label: 'الكاميرا',
+                      color: theme.colorScheme.secondary,
+                      onTap: () {
+                        Navigator.pop(context);
+                        _pickImageFromSource(ImageSource.camera);
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildImageSourceOption(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 24),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withValues(alpha: 0.2)),
+        ),
+        child: Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 28),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickImageFromSource(ImageSource source) async {
     final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    final pickedFile = await picker.pickImage(
+      source: source,
+      maxWidth: 512,
+      maxHeight: 512,
+      imageQuality: 80,
+    );
     
     if (pickedFile != null) {
       setState(() {
@@ -41,79 +156,99 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         _successMessage = null;
       });
       
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('تم اختيار الصورة بنجاح'),
-          backgroundColor: Colors.green,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('تم اختيار الصورة بنجاح'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     }
   }
 
   Future<void> _saveProfile() async {
     if (!_formKey.currentState!.validate()) return;
 
+    final authNotifier = ref.read(authProvider.notifier);
+    final currentUser = ref.read(authProvider).user;
+
+    // ✅ التحقق من وجود تغييرات حقيقية قبل الإرسال
+    final newName = _nameController.text.trim();
+    final bool hasNameChange = newName != (currentUser?.name ?? '');
+    final bool hasImageChange = _selectedImage != null;
+
+    if (!hasNameChange && !hasImageChange) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('لا توجد تغييرات للحفظ'),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
+
     setState(() {
       _isLoading = true;
       _successMessage = null;
     });
 
-    final authNotifier = ref.read(authProvider.notifier);
-    final currentUser = ref.read(authProvider).user;
-    bool nameUpdated = false;
-    bool imageUpdated = false;
+    try {
+      // ✅ تحديث ذري (Atomic Update) - إرسال كل التغييرات في طلب واحد
+      final result = await authNotifier.updateProfile(
+        name: hasNameChange ? newName : null,
+        imagePath: hasImageChange ? _selectedImage!.path : null,
+      );
 
-    // تحديث الاسم - استخدام authProvider مباشرة
-    if (_nameController.text.trim() != currentUser?.name) {
-      nameUpdated = await authNotifier.updateProfile(name: _nameController.text.trim());
-      if (nameUpdated) {
-        debugPrint('✅ تم تحديث الاسم بنجاح في authProvider');
-      }
-    }
+      if (mounted) {
+        if (result) {
+          String message = 'تم تحديث الملف الشخصي بنجاح';
+          if (hasNameChange && hasImageChange) {
+            message = 'تم تحديث الاسم والصورة بنجاح';
+          } else if (hasNameChange) {
+            message = 'تم تحديث الاسم بنجاح';
+          } else if (hasImageChange) {
+            message = 'تم تحديث الصورة بنجاح';
+          }
 
-    // تحديث الصورة - استخدام authProvider مباشرة
-    if (_selectedImage != null) {
-      imageUpdated = await authNotifier.updateProfileImage(_selectedImage!.path);
-      if (imageUpdated) {
-        debugPrint('✅ تم تحديث الصورة بنجاح في authProvider');
-      }
-    }
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(message),
+              backgroundColor: Colors.green,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 2),
+            ),
+          );
 
-    setState(() => _isLoading = false);
-
-    if (mounted) {
-      if (nameUpdated || imageUpdated) {
-        String message = '';
-        if (nameUpdated && imageUpdated) {
-          message = 'تم تحديث الاسم والصورة بنجاح';
-        } else if (nameUpdated) {
-          message = 'تم تحديث الاسم بنجاح';
-        } else if (imageUpdated) {
-          message = 'تم تحديث الصورة بنجاح';
+          setState(() {
+            _selectedImage = null;
+            _isLoading = false;
+            _successMessage = message;
+          });
+        } else {
+          // جلب رسالة الخطأ من الـ AuthState إذا وجدت
+          final error = ref.read(authProvider).error;
+          setState(() => _isLoading = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(error ?? 'فشل حفظ التغييرات، يرجى المحاولة مرة أخرى'),
+              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
         }
-
-        // تحديث profileProvider أيضاً إذا كنت تستخدمه
-        // ref.read(profileProvider.notifier).refreshUserData();
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(message),
-            backgroundColor: Colors.green,
-            behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 2),
-          ),
-        );
-
-        await Future.delayed(const Duration(milliseconds: 500));
-        if (mounted) {
-          Navigator.pop(context, true);
-        }
-      } else {
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('لا توجد تغييرات للحفظ'),
-            backgroundColor: Colors.orange,
+            content: Text('فشل حفظ التغييرات بسبب خطأ غير متوقع'),
+            backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
           ),
         );

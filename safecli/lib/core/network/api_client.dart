@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:dio/dio.dart';
-import 'package:device_info_plus/device_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // مفاتيح التخزين الآمن
@@ -185,24 +184,6 @@ class ApiClient {
     
     if (savedOverride != null && savedOverride.isNotEmpty) {
       _baseUrlOverride = savedOverride;
-      return;
-    }
-
-    if (kDebugMode) {
-      final deviceInfo = DeviceInfoPlugin();
-      if (Platform.isAndroid) {
-        final androidInfo = await deviceInfo.androidInfo;
-        if (!androidInfo.isPhysicalDevice) {
-          _baseUrlOverride = 'http://10.0.2.2:8000/api';
-          return;
-        }
-      } else if (Platform.isIOS) {
-        final iosInfo = await deviceInfo.iosInfo;
-        if (!iosInfo.isPhysicalDevice) {
-          _baseUrlOverride = 'http://127.0.0.1:8000/api';
-          return;
-        }
-      }
     }
   }
 

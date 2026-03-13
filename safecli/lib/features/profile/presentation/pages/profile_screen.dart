@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:safeclik/features/auth/presentation/providers/auth_controller.dart';
 import 'package:safeclik/features/scan/presentation/controllers/scan_notifier.dart';
@@ -438,17 +438,12 @@ class ProfileScreen extends ConsumerWidget {
                     color: Colors.transparent,
                     child: InkWell(
                       onTap: () async {
-                        final shouldRefresh = await Navigator.push(
+                        await Navigator.push(
                           context,
                           MaterialPageRoute(builder: (context) => const EditProfileScreen()),
                         );
-                        
-                        if (shouldRefresh == true && context.mounted) {
-                          ref.invalidate(authProvider);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            _buildSuccessSnackBar(context, 'تم تحديث الملف الشخصي بنجاح'),
-                          );
-                        }
+                        // ✅ لا حاجة لتحديث authProvider يدوياً
+                        // authNotifier.updateProfile() يحدث الحالة تلقائياً
                       },
                       borderRadius: BorderRadius.circular(30),
                       child: Padding(
